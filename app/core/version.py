@@ -1,0 +1,2 @@
+VERSION = "0.1.0"
+VERSION_TAG = f"v{VERSION}"

@@ -1,0 +1,5 @@
+benchmark_file: "data/samples/eval_prompts.json"
+output_dir: "outputs/eval"
+model_id: "deepseek-coder-v2-lite-instruct"
+temperature: 0.2
+max_new_tokens: 512

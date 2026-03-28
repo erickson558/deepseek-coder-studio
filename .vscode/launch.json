@@ -1,0 +1,26 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "API: FastAPI",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "uvicorn",
+      "args": ["app.main:app", "--host", "127.0.0.1", "--port", "8000"],
+      "jinja": true
+    },
+    {
+      "name": "CLI: Prepare Dataset",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "app.cli",
+      "args": [
+        "prepare-dataset",
+        "--input-path",
+        "data/samples/sample_dataset.jsonl",
+        "--output-dir",
+        "data/processed"
+      ]
+    }
+  ]
+}

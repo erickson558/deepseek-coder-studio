@@ -1,0 +1,76 @@
+[build-system]
+requires = ["setuptools>=75", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "deepseek-coder-studio"
+version = "0.1.0"
+description = "Fine-tuning, evaluation, inference and VS Code integration for code LLM workflows."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [
+  { name = "Erickson" }
+]
+keywords = ["llm", "fine-tuning", "codegen", "fastapi", "vscode", "lora", "qlora"]
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3 :: Only",
+  "License :: OSI Approved :: Apache Software License",
+  "Framework :: FastAPI",
+  "Topic :: Software Development :: Code Generators",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence"
+]
+dependencies = [
+  "accelerate>=1.5.2",
+  "datasets>=3.4.1",
+  "fastapi>=0.116.1",
+  "httpx>=0.28.1",
+  "orjson>=3.11.0",
+  "pandas>=2.3.0",
+  "peft>=0.17.0",
+  "pydantic>=2.11.7",
+  "pydantic-settings>=2.10.1",
+  "python-dotenv>=1.1.1",
+  "pyyaml>=6.0.2",
+  "rich>=14.1.0",
+  "safetensors>=0.6.2",
+  "sentencepiece>=0.2.1",
+  "torch>=2.8.0",
+  "transformers>=4.55.2",
+  "trl>=0.21.0",
+  "typer>=0.16.1",
+  "uvicorn[standard]>=0.35.0"
+]
+
+[project.optional-dependencies]
+gpu = [
+  "bitsandbytes>=0.46.0; platform_system != 'Windows'"
+]
+dev = [
+  "pytest>=8.4.1",
+  "pytest-cov>=6.2.1",
+  "pyinstaller>=6.15.0"
+]
+
+[project.urls]
+Homepage = "https://github.com/erickson558/deepseek-coder-studio"
+Repository = "https://github.com/erickson558/deepseek-coder-studio"
+Issues = "https://github.com/erickson558/deepseek-coder-studio/issues"
+
+[project.scripts]
+llmstudio = "app.cli:run"
+
+[tool.setuptools]
+packages = ["app"]
+
+[tool.setuptools.package-data]
+app = ["py.typed"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"

@@ -1,0 +1,128 @@
+{
+  "name": "deepseek-coder-studio",
+  "displayName": "DeepSeek Coder Studio",
+  "description": "VS Code assistant for code generation, bug fixing, refactoring, explanations and tests backed by the DeepSeek Coder Studio API.",
+  "version": "0.1.0",
+  "publisher": "erickson",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/erickson558/deepseek-coder-studio.git"
+  },
+  "homepage": "https://github.com/erickson558/deepseek-coder-studio",
+  "bugs": {
+    "url": "https://github.com/erickson558/deepseek-coder-studio/issues"
+  },
+  "files": [
+    "out/**",
+    "package.json",
+    "README.md",
+    "LICENSE"
+  ],
+  "engines": {
+    "vscode": "^1.93.0"
+  },
+  "categories": [
+    "Other",
+    "Programming Languages"
+  ],
+  "activationEvents": [
+    "onCommand:deepseekCoderStudio.explainSelectedCode",
+    "onCommand:deepseekCoderStudio.fixSelectedCode",
+    "onCommand:deepseekCoderStudio.refactorSelectedCode",
+    "onCommand:deepseekCoderStudio.generateTests",
+    "onCommand:deepseekCoderStudio.askAssistant",
+    "onCommand:deepseekCoderStudio.generateCodeFromPrompt",
+    "onCommand:deepseekCoderStudio.openAssistantPanel"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "deepseekCoderStudio.explainSelectedCode",
+        "title": "DeepSeek Coder Studio: Explain Selected Code"
+      },
+      {
+        "command": "deepseekCoderStudio.fixSelectedCode",
+        "title": "DeepSeek Coder Studio: Fix Selected Code"
+      },
+      {
+        "command": "deepseekCoderStudio.refactorSelectedCode",
+        "title": "DeepSeek Coder Studio: Refactor Selected Code"
+      },
+      {
+        "command": "deepseekCoderStudio.generateTests",
+        "title": "DeepSeek Coder Studio: Generate Tests for Selection"
+      },
+      {
+        "command": "deepseekCoderStudio.askAssistant",
+        "title": "DeepSeek Coder Studio: Ask Coding Assistant"
+      },
+      {
+        "command": "deepseekCoderStudio.generateCodeFromPrompt",
+        "title": "DeepSeek Coder Studio: Generate Code From Prompt"
+      },
+      {
+        "command": "deepseekCoderStudio.openAssistantPanel",
+        "title": "DeepSeek Coder Studio: Open Assistant Panel"
+      }
+    ],
+    "configuration": {
+      "title": "DeepSeek Coder Studio",
+      "properties": {
+        "deepseekCoderStudio.backendUrl": {
+          "type": "string",
+          "default": "http://127.0.0.1:8000",
+          "description": "Base URL of the Python backend API."
+        },
+        "deepseekCoderStudio.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "Optional API key sent in the X-API-Key header."
+        },
+        "deepseekCoderStudio.activeModel": {
+          "type": "string",
+          "default": "deepseek-coder-v2-lite-instruct",
+          "description": "Logical model identifier sent to the backend."
+        },
+        "deepseekCoderStudio.timeoutMs": {
+          "type": "number",
+          "default": 120000,
+          "description": "HTTP timeout for backend requests."
+        },
+        "deepseekCoderStudio.temperature": {
+          "type": "number",
+          "default": 0.2,
+          "description": "Sampling temperature."
+        },
+        "deepseekCoderStudio.maxTokens": {
+          "type": "number",
+          "default": 512,
+          "description": "Maximum generated tokens."
+        },
+        "deepseekCoderStudio.mode": {
+          "type": "string",
+          "default": "local",
+          "enum": ["local", "remote"],
+          "description": "Connection mode for the assistant backend."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "compile": "node ./esbuild.mjs",
+    "watch": "node ./esbuild.mjs --watch",
+    "check-types": "tsc --noEmit -p ./",
+    "package": "npm run compile && npm run check-types && vsce package"
+  },
+  "dependencies": {
+    "axios": "^1.12.2"
+  },
+  "devDependencies": {
+    "@types/node": "^24.3.1",
+    "@types/vscode": "^1.93.0",
+    "@vscode/vsce": "^3.6.2",
+    "esbuild": "^0.25.9",
+    "typescript": "^5.9.2"
+  }
+}

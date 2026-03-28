@@ -1,0 +1,12 @@
+app:
+  name: DeepSeek Coder Studio
+  version: 0.1.0
+  base_model: deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct
+  default_model_id: deepseek-coder-v2-lite-instruct
+  model_source: adapter
+  default_temperature: 0.2
+  default_max_new_tokens: 512
+architecture:
+  training_strategy: LoRA
+  api_backend: FastAPI
+  extension_client: VS Code TypeScript

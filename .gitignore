@@ -1,0 +1,52 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.venv/
+venv/
+env/
+
+# Packaging
+build/
+dist/
+*.egg-info/
+*.spec
+llmstudio.exe
+
+# Runtime outputs
+outputs/checkpoints/*
+outputs/adapters/*
+outputs/merged/*
+outputs/logs/*
+outputs/eval/*
+!outputs/checkpoints/.gitkeep
+!outputs/adapters/.gitkeep
+!outputs/merged/.gitkeep
+!outputs/logs/.gitkeep
+!outputs/eval/.gitkeep
+
+# Data
+data/raw/*
+data/processed/*
+!data/raw/.gitkeep
+!data/processed/.gitkeep
+
+# IDE / OS
+.idea/
+.DS_Store
+Thumbs.db
+
+# VS Code extension
+vscode-extension/node_modules/
+vscode-extension/out/
+vscode-extension/*.vsix
+
+# Secrets
+.env
+.env.local

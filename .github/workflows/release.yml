@@ -1,0 +1,116 @@
+name: release
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+
+jobs:
+  build-python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt build
+
+      - name: Run tests
+        run: pytest
+
+      - name: Build Python distribution
+        run: python -m build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: python-dist
+          path: dist/*
+
+  build-extension:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: "vscode-extension/package-lock.json"
+
+      - name: Install extension dependencies
+        working-directory: vscode-extension
+        run: npm ci
+
+      - name: Build VS Code extension
+        working-directory: vscode-extension
+        run: npm run package
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vscode-extension
+          path: vscode-extension/*.vsix
+
+  build-exe:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Build executable
+        shell: pwsh
+        run: ./scripts/build_exe.ps1
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-exe
+          path: llmstudio.exe
+
+  release:
+    needs: [build-python, build-extension, build-exe]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Read version
+        run: echo "VERSION=$(cat VERSION)" >> "$GITHUB_ENV"
+
+      - name: Fail if tag already exists
+        run: |
+          git fetch --tags
+          if git rev-parse "refs/tags/v${VERSION}" >/dev/null 2>&1; then
+            echo "Version v${VERSION} already exists. Bump the version before pushing to main."
+            exit 1
+          fi
+
+      - uses: actions/download-artifact@v4
+        with:
+          path: release-artifacts
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.VERSION }}
+          name: v${{ env.VERSION }}
+          generate_release_notes: true
+          files: |
+            release-artifacts/python-dist/*
+            release-artifacts/windows-exe/*
+            release-artifacts/vscode-extension/*

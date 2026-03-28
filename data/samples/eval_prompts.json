@@ -1,0 +1,45 @@
+{
+  "cases": [
+    {
+      "id": "eval-gen-001",
+      "task": "code_generation",
+      "language": "python",
+      "prompt": "Write a Python function called `safe_divide` that returns 0 when the denominator is zero.",
+      "expected_substrings": ["def safe_divide", "denominator", "0"],
+      "forbidden_substrings": ["TODO"]
+    },
+    {
+      "id": "eval-bug-001",
+      "task": "bug_fixing",
+      "language": "python",
+      "prompt": "Fix this function so it sums all numbers: def total(values): return 0",
+      "expected_substrings": ["sum", "values"],
+      "forbidden_substrings": ["return 0"],
+      "reference_answer": "def total(values):\n    return sum(values)\n"
+    },
+    {
+      "id": "eval-ref-001",
+      "task": "refactor",
+      "language": "python",
+      "prompt": "Refactor a function that mixes validation and formatting responsibilities.",
+      "expected_substrings": ["def", "return"],
+      "forbidden_substrings": ["TODO"]
+    },
+    {
+      "id": "eval-exp-001",
+      "task": "code_explanation",
+      "language": "python",
+      "prompt": "Explain what this function does: def flatten(rows): return [item for row in rows for item in row]",
+      "expected_substrings": ["list", "row"],
+      "forbidden_substrings": ["TODO"]
+    },
+    {
+      "id": "eval-test-001",
+      "task": "test_generation",
+      "language": "python",
+      "prompt": "Generate pytest tests for a `slugify` function that lowercases text and replaces spaces with hyphens.",
+      "expected_substrings": ["pytest", "slugify", "assert"],
+      "forbidden_substrings": ["TODO"]
+    }
+  ]
+}
