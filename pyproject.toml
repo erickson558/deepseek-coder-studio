@@ -4,11 +4,11 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "deepseek-coder-studio"
-version = "0.1.1"
+version = "0.2.0"
 description = "Fine-tuning, evaluation, inference and VS Code integration for code LLM workflows."
 readme = "README.md"
 requires-python = ">=3.10"
-license = { text = "Apache-2.0" }
+license = "Apache-2.0"
 authors = [
   { name = "Erickson" }
 ]
@@ -16,7 +16,6 @@ keywords = ["llm", "fine-tuning", "codegen", "fastapi", "vscode", "lora", "qlora
 classifiers = [
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3 :: Only",
-  "License :: OSI Approved :: Apache Software License",
   "Framework :: FastAPI",
   "Topic :: Software Development :: Code Generators",
   "Topic :: Scientific/Engineering :: Artificial Intelligence"
@@ -60,9 +59,10 @@ Issues = "https://github.com/erickson558/deepseek-coder-studio/issues"
 
 [project.scripts]
 llmstudio = "app.cli:run"
+llmstudio-gui = "app.gui:run"
 
-[tool.setuptools]
-packages = ["app"]
+[tool.setuptools.packages.find]
+include = ["app*"]
 
 [tool.setuptools.package-data]
 app = ["py.typed"]

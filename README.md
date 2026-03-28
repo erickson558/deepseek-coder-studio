@@ -1,8 +1,8 @@
 # DeepSeek Coder Studio
 
-DeepSeek Coder Studio is a production-oriented starter platform for fine-tuning and serving a coding LLM based on `deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct`. It includes dataset preparation, LoRA/QLoRA training, evaluation, local or remote inference, a FastAPI backend, and a VS Code extension that consumes the backend from inside the editor.
+DeepSeek Coder Studio is a production-oriented starter platform for fine-tuning and serving a coding LLM based on `deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct`. It now includes a desktop GUI for Windows-friendly operation, plus dataset preparation, LoRA/QLoRA training, evaluation, local or remote inference, a FastAPI backend, and a VS Code extension that consumes the backend from inside the editor.
 
-Version: `V0.1.1`
+Version: `V0.2.0`
 
 License: Apache License 2.0
 
@@ -10,7 +10,7 @@ License: Apache License 2.0
 
 ### Selected architecture
 
-The solution is split into a Python platform under `app/` and a VS Code client under `vscode-extension/`.
+The solution is split into a Python platform under `app/`, a desktop GUI layer under `app/gui`, and a VS Code client under `vscode-extension/`.
 
 - `app/dataset` prepares and validates training data.
 - `app/training` handles LoRA or QLoRA fine-tuning jobs.
@@ -18,6 +18,7 @@ The solution is split into a Python platform under `app/` and a VS Code client u
 - `app/evaluation` runs benchmark prompts and writes JSON/Markdown reports.
 - `app/api` exposes the assistant as a FastAPI service.
 - `app/services` decouples API and CLI orchestration from runtime model logic.
+- `app/gui` provides a non-blocking desktop frontend with silent background execution.
 - `vscode-extension` provides editor commands and a side panel over the backend API.
 
 This baseline is prepared to evolve toward RAG, multi-file context, Git-aware workflows, multiple providers and richer editor-assisted file editing.
@@ -33,6 +34,7 @@ This baseline is prepared to evolve toward RAG, multi-file context, Git-aware wo
 │   ├── core/
 │   ├── dataset/
 │   ├── evaluation/
+│   ├── gui/
 │   ├── inference/
 │   ├── models/
 │   ├── services/
@@ -60,6 +62,7 @@ This baseline is prepared to evolve toward RAG, multi-file context, Git-aware wo
 ├── README.md
 ├── VERSION
 ├── llmstudio.py
+├── llmstudio_cli.py
 ├── pyproject.toml
 └── requirements.txt
 ```
@@ -72,7 +75,8 @@ This baseline is prepared to evolve toward RAG, multi-file context, Git-aware wo
 4. The training output stores adapters and can optionally export a merged model.
 5. The inference engine loads the base model plus adapter or the merged model and serves prompts from CLI or API.
 6. The evaluation runner executes benchmark prompts and generates JSON and Markdown reports.
-7. The VS Code extension sends editor selections or prompts to the backend and lets the user insert, replace or inspect the answer.
+7. The desktop GUI orchestrates the backend, dataset jobs, evaluation and local inference without opening a console window.
+8. The VS Code extension sends editor selections or prompts to the backend and lets the user insert, replace or inspect the answer.
 
 ## Installation
 
@@ -86,6 +90,15 @@ pip install -r requirements.txt
 copy .env.example .env
 ```
 
+### Desktop GUI
+
+```bash
+python llmstudio.py
+```
+
+The GUI stores `config.json` and `log.txt` next to the `.py` or packaged `.exe`.
+All long-running actions execute in background threads so the window stays responsive.
+
 ### VS Code extension
 
 ```bash
@@ -94,7 +107,27 @@ npm install
 npm run compile
 ```
 
+## GUI Features
+
+- Silent desktop frontend without console windows in the packaged `.exe`
+- Start/stop/check the FastAPI backend from the GUI
+- Prepare datasets, launch training and run evaluation from tabs
+- Local inference panel for prompts and task-specific coding requests
+- Auto-save of GUI preferences to `config.json`
+- File logging to `log.txt`
+- Auto-start API on launch
+- Auto-close countdown on inactivity
+- About dialog with visible version
+- Spanish/English interface labels
+
 ## CLI
+
+The original CLI remains available for automation and power users:
+
+```bash
+python llmstudio_cli.py --help
+python -m app.cli --help
+```
 
 ### Prepare dataset
 
@@ -195,7 +228,7 @@ Supported task families:
 
 ## Build the executable
 
-The project includes a PowerShell build script that compiles `llmstudio.py` into `llmstudio.exe` in the same folder as the `.py` file, using the `.ico` file found at the repository root.
+The project includes a PowerShell build script that compiles the GUI entrypoint `llmstudio.py` into `llmstudio.exe` in the same folder as the `.py` file, using the `.ico` file found at the repository root and packaging it without an attached console window.
 
 ```bash
 powershell -ExecutionPolicy Bypass -File scripts/build_exe.ps1

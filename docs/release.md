@@ -33,6 +33,6 @@ The workflow:
 4. Builds the Windows `.exe`.
 5. Creates a GitHub release using the current semantic version.
 
-If the version tag already exists, the workflow fails to force an explicit version bump.
-
 GitHub tags and releases use the visible format `Vx.x.x`, while package metadata keeps the numeric semver form `x.x.x` required by Python and npm tooling.
+
+Manual tags are also supported. If you create and push `Vx.x.x` yourself, the workflow reuses that tag instead of failing.

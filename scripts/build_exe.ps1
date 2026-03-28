@@ -1,4 +1,4 @@
-# Build the CLI entrypoint into a standalone Windows executable.
+# Build the GUI entrypoint into a standalone Windows executable.
 param(
     [string]$PythonExe = "python"
 )
@@ -20,7 +20,7 @@ if (-not $iconFile) {
     --noconfirm `
     --clean `
     --onefile `
-    --console `
+    --windowed `
     --name "llmstudio" `
     --icon $iconFile.FullName `
     $entryScript

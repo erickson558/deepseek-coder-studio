@@ -105,14 +105,16 @@ def update_training_config_names(version: str) -> None:
 
 
 def ensure_changelog(version: str) -> None:
-    if CHANGELOG_PATH.exists():
+    if not CHANGELOG_PATH.exists():
+        CHANGELOG_PATH.write_text("# Changelog\n\n", encoding="utf-8")
+
+    content = CHANGELOG_PATH.read_text(encoding="utf-8")
+    marker = f"## V{version}"
+    if marker in content:
         return
-    CHANGELOG_PATH.write_text(
-        "# Changelog\n\n"
-        f"## V{version}\n\n"
-        "- Initial public release of DeepSeek Coder Studio.\n",
-        encoding="utf-8",
-    )
+
+    updated = content.rstrip() + f"\n\n{marker}\n\n- Describe the release changes here.\n"
+    CHANGELOG_PATH.write_text(updated + "\n", encoding="utf-8")
 
 
 if __name__ == "__main__":

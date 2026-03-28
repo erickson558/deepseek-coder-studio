@@ -50,3 +50,6 @@ vscode-extension/*.vsix
 # Secrets
 .env
 .env.local
+config.json
+log.txt
+llmstudio.spec
