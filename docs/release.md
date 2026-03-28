@@ -19,6 +19,8 @@ python scripts/bump_version.py major
 python scripts/bump_version.py --set-version 1.0.0
 ```
 
+The bump script also updates the visible README version, the API version test, and versioned training job names so releases stay aligned.
+
 ## GitHub release workflow
 
 Every push to `main` triggers `.github/workflows/release.yml`.
@@ -32,3 +34,5 @@ The workflow:
 5. Creates a GitHub release using the current semantic version.
 
 If the version tag already exists, the workflow fails to force an explicit version bump.
+
+GitHub tags and releases use the visible format `Vx.x.x`, while package metadata keeps the numeric semver form `x.x.x` required by Python and npm tooling.

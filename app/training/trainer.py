@@ -1,3 +1,5 @@
+"""Fine-tuning runner for LoRA and QLoRA jobs."""
+
 from pathlib import Path
 from typing import Any
 
@@ -14,11 +16,15 @@ LOGGER = get_logger(__name__)
 
 
 class FineTuneRunner:
+    """Orchestrates dataset loading, tokenization, training and adapter export."""
+
     def run(self, config_path: str | Path) -> dict[str, Any]:
+        """Load a YAML config and execute the configured training job."""
         config = load_training_config(config_path)
         return self.run_job(config)
 
     def run_job(self, config: TrainingJobConfig) -> dict[str, Any]:
+        """Execute a fine-tuning job using the configured strategy."""
         try:
             import torch
             from datasets import Dataset
@@ -50,6 +56,7 @@ class FineTuneRunner:
         validation_dataset = Dataset.from_list(validation_records)
 
         def tokenize_batch(batch: dict[str, list[Any]]) -> dict[str, list[list[int]]]:
+            """Tokenize prompts and mirror input IDs into labels for causal LM training."""
             encoded = tokenizer(
                 batch["text"],
                 truncation=True,
@@ -88,6 +95,7 @@ class FineTuneRunner:
             model = prepare_model_for_kbit_training(model)
         model = get_peft_model(model, build_lora_config(config))
         if config.gradient_checkpointing:
+            # Gradient checkpointing reduces memory usage at the cost of extra compute.
             model.gradient_checkpointing_enable()
         model.print_trainable_parameters()
 
@@ -130,6 +138,7 @@ class FineTuneRunner:
 
         merged_path = None
         if config.merge_adapter:
+            # Export a merged model when downstream inference should not depend on PEFT adapters.
             merged_path = merge_adapter(
                 base_model=config.base_model,
                 adapter_dir=adapter_output_dir,

@@ -1,3 +1,5 @@
+"""FastAPI application factory and lifecycle hooks."""
+
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
@@ -14,6 +16,7 @@ LOGGER = get_logger(__name__)
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    """Log process startup and shutdown without loading heavy services eagerly."""
     settings = get_settings()
     LOGGER.info("Starting %s v%s in %s", settings.app_name, VERSION, settings.env)
     yield
@@ -21,6 +24,7 @@ async def lifespan(_: FastAPI):
 
 
 def create_app() -> FastAPI:
+    """Build the FastAPI app with CORS and route registration."""
     settings = get_settings()
     app = FastAPI(
         title=settings.app_name,

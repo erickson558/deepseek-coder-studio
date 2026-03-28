@@ -1,3 +1,5 @@
+"""Benchmark runner that exercises the inference service with curated prompts."""
+
 from pathlib import Path
 from typing import Any
 
@@ -17,16 +19,20 @@ LOGGER = get_logger(__name__)
 
 
 class EvaluationRunner:
+    """Execute benchmark cases and write machine-readable plus Markdown reports."""
+
     def __init__(self) -> None:
         self.service = AssistantService(get_settings())
 
     def run(self, config_path: str | Path) -> dict[str, Any]:
+        """Run all benchmark cases defined in the provided evaluation config."""
         config = self._load_config(config_path)
         cases = self._load_cases(config.benchmark_file)
         results: list[dict[str, Any]] = []
 
         for case in cases:
             LOGGER.info("Evaluating case %s", case.id)
+            # Each benchmark is routed through the same service layer used by the API.
             request = TaskRequest(
                 prompt=case.prompt,
                 task_context=case.context,

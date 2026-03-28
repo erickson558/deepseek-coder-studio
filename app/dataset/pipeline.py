@@ -1,3 +1,5 @@
+"""Dataset preparation pipeline used by the CLI and training jobs."""
+
 from pathlib import Path
 from typing import Any
 
@@ -16,12 +18,14 @@ def prepare_dataset(
     validation_ratio: float = 0.1,
     seed: int = 42,
 ) -> dict[str, Any]:
+    """Normalise, validate and split a dataset into train/validation/test files."""
     raw_records = load_records(input_path)
     normalised_examples: list[DatasetExample] = []
     invalid_rows: list[dict[str, str]] = []
 
     for index, raw in enumerate(raw_records):
         try:
+            # Convert heterogeneous source rows into the canonical instruct/chat structure.
             normalised_examples.append(normalise_record(raw))
         except Exception as exc:  # noqa: BLE001
             invalid_rows.append({"index": str(index), "reason": str(exc)})
@@ -39,6 +43,7 @@ def prepare_dataset(
     )
     target_dir = ensure_directory(output_dir)
 
+    # Persist the splits in JSONL so they are directly consumable by training scripts.
     write_jsonl(target_dir / "train.jsonl", [_to_record(item) for item in train_split])
     write_jsonl(target_dir / "validation.jsonl", [_to_record(item) for item in validation_split])
     write_jsonl(target_dir / "test.jsonl", [_to_record(item) for item in test_split])

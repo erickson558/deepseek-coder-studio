@@ -1,3 +1,5 @@
+"""Runtime model loader and text generation engine."""
+
 import time
 from typing import Any
 
@@ -13,6 +15,8 @@ LOGGER = get_logger(__name__)
 
 
 class InferenceEngine:
+    """Lazy model runtime used by the API, CLI and evaluation modules."""
+
     def __init__(self, settings: AppSettings):
         self.settings = settings
         self._model: Any = None
@@ -32,6 +36,7 @@ class InferenceEngine:
         ]
 
     def generate(self, request: GenerateRequest) -> InferenceResponse:
+        """Handle one-shot generation requests."""
         prompt = request.prompt if not request.context else f"{request.prompt}\n\n{request.context}"
         return self._run_prompt(
             prompt=prompt,
@@ -41,6 +46,7 @@ class InferenceEngine:
         )
 
     def chat(self, request: ChatRequest) -> InferenceResponse:
+        """Handle conversational requests by rendering message history into a prompt."""
         self._ensure_loaded(request.model)
         prompt = render_messages(request.messages, tokenizer=self._tokenizer)
         return self._run_prompt(
@@ -57,6 +63,7 @@ class InferenceEngine:
         parameters: GenerationParameters,
         requested_model: str | None = None,
     ) -> InferenceResponse:
+        """Run a task-specific prompt through the loaded model."""
         return self._run_prompt(
             prompt=prompt,
             task=task,
@@ -71,6 +78,7 @@ class InferenceEngine:
         parameters: GenerationParameters,
         requested_model: str | None = None,
     ) -> InferenceResponse:
+        """Tokenize the prompt, execute generation and format the response payload."""
         self._ensure_loaded(requested_model)
         start = time.perf_counter()
 
@@ -101,11 +109,13 @@ class InferenceEngine:
         )
 
     def _ensure_loaded(self, requested_model: str | None) -> None:
+        """Load the model lazily on first use."""
         if self._model is not None and self._tokenizer is not None:
             return
         self._load_model(requested_model)
 
     def _load_model(self, requested_model: str | None) -> None:
+        """Load the configured base model plus adapter or the merged model snapshot."""
         try:
             import torch
             from peft import PeftModel
@@ -144,6 +154,7 @@ class InferenceEngine:
             model = PeftModel.from_pretrained(model, str(self.settings.adapter_dir))
 
         if device_map is None:
+            # CPU mode needs an explicit device because no automatic placement is available.
             self._device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
             model = model.to(self._device)
         self._model = model.eval()

@@ -17,6 +17,7 @@ export class AssistantPanel {
     this.panel.onDidDispose(() => {
       AssistantPanel.currentPanel = undefined;
     });
+    // Start with a lightweight placeholder so commands can reuse the same panel.
     this.panel.webview.html = this.render("Assistant ready.", "Use a command from the Command Palette.");
   }
 
@@ -31,6 +32,7 @@ export class AssistantPanel {
   }
 
   update(title: string, requestSummary: string, responseText: string): void {
+    // Refresh the same panel instead of creating a new one for each command result.
     this.panel.title = `DeepSeek Coder Studio: ${title}`;
     this.panel.webview.html = this.render(requestSummary, responseText);
   }

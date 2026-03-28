@@ -8,6 +8,7 @@ import { applyResultToEditor, copyToClipboard, getEditorContext } from "../utils
 type TaskEndpoint = "/explain" | "/fix" | "/refactor" | "/tests";
 
 export function registerCodeActionCommands(context: vscode.ExtensionContext): void {
+  // Register editor-selection based commands exposed in the Command Palette.
   context.subscriptions.push(
     vscode.commands.registerCommand("deepseekCoderStudio.explainSelectedCode", () => runTask(context, "/explain", "Explain Selected Code")),
     vscode.commands.registerCommand("deepseekCoderStudio.fixSelectedCode", () => runTask(context, "/fix", "Fix Selected Code")),
@@ -27,6 +28,7 @@ async function runTask(context: vscode.ExtensionContext, endpoint: TaskEndpoint,
   const panel = AssistantPanel.createOrShow(context.extensionUri);
 
   const payload: TaskRequest = {
+    // Send both the selection and wider file context so the backend can answer more accurately.
     selection: editorContext.selection,
     file_content: editorContext.fileContent,
     file_path: editorContext.filePath,
@@ -43,6 +45,7 @@ async function runTask(context: vscode.ExtensionContext, endpoint: TaskEndpoint,
         panel.update(title, `${endpoint}\n${editorContext.filePath ?? editorContext.language}`, response.output_text);
         await presentResultOptions(response.output_text);
       } catch (error) {
+        // Surface backend or connectivity errors without crashing the extension host.
         showError(error);
       }
     }
@@ -50,6 +53,7 @@ async function runTask(context: vscode.ExtensionContext, endpoint: TaskEndpoint,
 }
 
 export function registerPromptCommands(context: vscode.ExtensionContext): void {
+  // Register prompt-driven commands that do not require a selection.
   context.subscriptions.push(
     vscode.commands.registerCommand("deepseekCoderStudio.generateCodeFromPrompt", () => generateFromPrompt(context)),
     vscode.commands.registerCommand("deepseekCoderStudio.askAssistant", () => askAssistant(context))
@@ -106,6 +110,7 @@ async function askAssistant(context: vscode.ExtensionContext): Promise<void> {
     : question;
 
   try {
+    // Reuse the chat endpoint for open-ended programming requests.
     const response = await client.chat({
       model: config.activeModel,
       parameters: config.generation,
@@ -119,6 +124,7 @@ async function askAssistant(context: vscode.ExtensionContext): Promise<void> {
 }
 
 async function presentResultOptions(content: string): Promise<void> {
+  // Let the user decide how to apply the result after each assistant response.
   const choice = await vscode.window.showQuickPick(
     [
       { label: "Replace selection", mode: "replace" as const },
@@ -140,6 +146,7 @@ async function presentResultOptions(content: string): Promise<void> {
 }
 
 function showError(error: unknown): void {
+  // Keep error messages short and actionable for editor users.
   const message = error instanceof Error ? error.message : "Unknown backend error";
   void vscode.window.showErrorMessage(`DeepSeek Coder Studio request failed: ${message}`);
 }

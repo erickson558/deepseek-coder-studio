@@ -11,6 +11,7 @@ export interface ExtensionConfig {
 }
 
 export function getExtensionConfig(): ExtensionConfig {
+  // Read all extension settings from the official VS Code configuration registry.
   const configuration = vscode.workspace.getConfiguration("deepseekCoderStudio");
 
   return {

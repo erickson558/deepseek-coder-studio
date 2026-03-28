@@ -8,6 +8,8 @@ from pathlib import Path
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
+README_PATH = ROOT / "README.md"
+CHANGELOG_PATH = ROOT / "CHANGELOG.md"
 
 
 def main() -> None:
@@ -25,8 +27,12 @@ def main() -> None:
     update_extension_package(new_version)
     update_app_config(new_version)
     update_package_lock(new_version)
+    update_readme(new_version)
+    update_tests(new_version)
+    update_training_config_names(new_version)
+    ensure_changelog(new_version)
 
-    print(f"Updated project version to v{new_version}")
+    print(f"Updated project version to V{new_version}")
 
 
 def increment_version(version: str, part: str) -> str:
@@ -75,6 +81,38 @@ def update_app_config(version: str) -> None:
     payload = yaml.safe_load(config_path.read_text(encoding="utf-8"))
     payload["app"]["version"] = version
     config_path.write_text(yaml.safe_dump(payload, sort_keys=False), encoding="utf-8")
+
+
+def update_readme(version: str) -> None:
+    content = README_PATH.read_text(encoding="utf-8")
+    content = re.sub(r"Version:\s*`V?\d+\.\d+\.\d+`", f"Version: `V{version}`", content)
+    README_PATH.write_text(content, encoding="utf-8")
+
+
+def update_tests(version: str) -> None:
+    api_test = ROOT / "tests" / "test_api.py"
+    content = api_test.read_text(encoding="utf-8")
+    content = re.sub(r'payload\["version"\] == "\d+\.\d+\.\d+"', f'payload["version"] == "{version}"', content)
+    api_test.write_text(content, encoding="utf-8")
+
+
+def update_training_config_names(version: str) -> None:
+    dashed = version.replace(".", "-")
+    for path in (ROOT / "configs" / "training").glob("*.yaml"):
+        content = path.read_text(encoding="utf-8")
+        content = re.sub(r'job_name:\s*"([^"]+)-v\d+-\d+-\d+"', f'job_name: "\\1-v{dashed}"', content)
+        path.write_text(content, encoding="utf-8")
+
+
+def ensure_changelog(version: str) -> None:
+    if CHANGELOG_PATH.exists():
+        return
+    CHANGELOG_PATH.write_text(
+        "# Changelog\n\n"
+        f"## V{version}\n\n"
+        "- Initial public release of DeepSeek Coder Studio.\n",
+        encoding="utf-8",
+    )
 
 
 if __name__ == "__main__":

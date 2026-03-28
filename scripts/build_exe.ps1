@@ -1,7 +1,9 @@
+# Build the CLI entrypoint into a standalone Windows executable.
 param(
     [string]$PythonExe = "python"
 )
 
+# Resolve all paths from the repository root so the script works from CI and locally.
 $root = Split-Path -Parent $PSScriptRoot
 $entryScript = Join-Path $root "llmstudio.py"
 $iconFile = Get-ChildItem -Path $root -Filter *.ico | Select-Object -First 1
@@ -18,10 +20,12 @@ if (-not $iconFile) {
     --noconfirm `
     --clean `
     --onefile `
+    --console `
     --name "llmstudio" `
     --icon $iconFile.FullName `
     $entryScript
 
+# Copy the built file next to the Python entrypoint for the user's preferred layout.
 $builtExe = Join-Path $root "dist\\llmstudio.exe"
 $targetExe = Join-Path $root "llmstudio.exe"
 

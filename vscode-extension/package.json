@@ -2,7 +2,7 @@
   "name": "deepseek-coder-studio",
   "displayName": "DeepSeek Coder Studio",
   "description": "VS Code assistant for code generation, bug fixing, refactoring, explanations and tests backed by the DeepSeek Coder Studio API.",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "erickson",
   "license": "Apache-2.0",
   "repository": {
@@ -103,7 +103,10 @@
         "deepseekCoderStudio.mode": {
           "type": "string",
           "default": "local",
-          "enum": ["local", "remote"],
+          "enum": [
+            "local",
+            "remote"
+          ],
           "description": "Connection mode for the assistant backend."
         }
       }

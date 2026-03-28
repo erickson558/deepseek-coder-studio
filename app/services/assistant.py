@@ -1,3 +1,5 @@
+"""Service layer that exposes a stable interface for CLI, API and evaluation."""
+
 from app.core.config import AppSettings
 from app.inference.engine import InferenceEngine
 from app.models.api import ChatRequest, GenerateRequest, InferenceResponse
@@ -6,6 +8,8 @@ from app.services.registry import ModelRegistry
 
 
 class AssistantService:
+    """Facade over the model registry and inference engine."""
+
     def __init__(self, settings: AppSettings):
         self.registry = ModelRegistry(settings)
         self.engine = InferenceEngine(settings)

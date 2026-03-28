@@ -1,3 +1,5 @@
+"""Typer-based command line entry point for project operations."""
+
 from pathlib import Path
 
 import typer
@@ -21,6 +23,7 @@ console = Console()
 
 @cli.command("version")
 def version() -> None:
+    """Print the current application version."""
     console.print(VERSION)
 
 
@@ -32,6 +35,7 @@ def prepare_dataset_command(
     validation_ratio: float = typer.Option(0.1, help="Validation split ratio"),
     seed: int = typer.Option(42, help="Shuffle seed"),
 ) -> None:
+    """Prepare a raw dataset for training."""
     summary = prepare_dataset(
         input_path=input_path,
         output_dir=output_dir,
@@ -44,12 +48,14 @@ def prepare_dataset_command(
 
 @cli.command("train")
 def train_command(config: str = typer.Option(..., help="Training config YAML path")) -> None:
+    """Run a fine-tuning job from a YAML config."""
     summary = FineTuneRunner().run(config)
     console.print_json(data=summary)
 
 
 @cli.command("evaluate")
 def evaluate_command(config: str = typer.Option(..., help="Evaluation config YAML path")) -> None:
+    """Execute the configured benchmark suite."""
     report = EvaluationRunner().run(config)
     console.print_json(data=report["summary"])
 
@@ -64,6 +70,7 @@ def infer_command(
     max_new_tokens: int = typer.Option(512, help="Generation length"),
     temperature: float = typer.Option(0.2, help="Sampling temperature"),
 ) -> None:
+    """Run a single inference task from the terminal."""
     service = AssistantService(get_settings())
     context = context_file.read_text(encoding="utf-8") if context_file else None
     parameters = GenerationParameters(
@@ -102,6 +109,7 @@ def serve_command(
     host: str = typer.Option(None, help="Host override"),
     port: int = typer.Option(None, help="Port override"),
 ) -> None:
+    """Serve the FastAPI backend."""
     settings = get_settings()
     uvicorn.run(
         "app.main:app",
@@ -117,6 +125,7 @@ def chat_command(
     max_new_tokens: int = typer.Option(512, help="Generation length"),
     temperature: float = typer.Option(0.2, help="Sampling temperature"),
 ) -> None:
+    """Run a simple chat exchange from the terminal."""
     service = AssistantService(get_settings())
     request = ChatRequest(
         messages=[Message(role="user", content=message)],
@@ -130,4 +139,5 @@ def chat_command(
 
 
 def run() -> None:
+    """Entrypoint used by both `python -m app.cli` and the console script."""
     cli()

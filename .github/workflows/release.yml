@@ -95,8 +95,8 @@ jobs:
       - name: Fail if tag already exists
         run: |
           git fetch --tags
-          if git rev-parse "refs/tags/v${VERSION}" >/dev/null 2>&1; then
-            echo "Version v${VERSION} already exists. Bump the version before pushing to main."
+          if git rev-parse "refs/tags/V${VERSION}" >/dev/null 2>&1; then
+            echo "Version V${VERSION} already exists. Bump the version before pushing to main."
             exit 1
           fi
 
@@ -107,8 +107,8 @@ jobs:
       - name: Create GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v${{ env.VERSION }}
-          name: v${{ env.VERSION }}
+          tag_name: V${{ env.VERSION }}
+          name: V${{ env.VERSION }}
           generate_release_notes: true
           files: |
             release-artifacts/python-dist/*

@@ -2,7 +2,7 @@
 
 DeepSeek Coder Studio is a production-oriented starter platform for fine-tuning and serving a coding LLM based on `deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct`. It includes dataset preparation, LoRA/QLoRA training, evaluation, local or remote inference, a FastAPI backend, and a VS Code extension that consumes the backend from inside the editor.
 
-Version: `0.1.0`
+Version: `V0.1.1`
 
 License: Apache License 2.0
 
@@ -216,6 +216,8 @@ Current synced locations:
 - `pyproject.toml`
 - `configs/app.yaml`
 - `vscode-extension/package.json`
+
+Visible Git tags and GitHub releases use the `Vx.x.x` format. Tooling files that require strict semver keep the numeric form `x.x.x`.
 
 ## GitHub best practices included
 

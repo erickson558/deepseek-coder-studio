@@ -3,11 +3,13 @@ import { registerCodeActionCommands, registerPromptCommands } from "./commands/c
 import { AssistantPanel } from "./panels/assistantPanel";
 
 export function activate(context: vscode.ExtensionContext): void {
+  // Register all commands during extension activation.
   registerCodeActionCommands(context);
   registerPromptCommands(context);
 
   context.subscriptions.push(
     vscode.commands.registerCommand("deepseekCoderStudio.openAssistantPanel", () => {
+      // Create or focus the assistant panel on demand.
       AssistantPanel.createOrShow(context.extensionUri);
     })
   );
