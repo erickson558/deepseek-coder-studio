@@ -16,22 +16,52 @@ if (-not $iconFile) {
     throw "No .ico file was found in $root"
 }
 
-& $PythonExe -m PyInstaller `
-    --noconfirm `
-    --clean `
-    --onefile `
-    --windowed `
-    --name "llmstudio" `
-    --icon $iconFile.FullName `
-    $entryScript
-
-# Copy the built file next to the Python entrypoint for the user's preferred layout.
-$builtExe = Join-Path $root "dist\\llmstudio.exe"
-$targetExe = Join-Path $root "llmstudio.exe"
-
-if (-not (Test-Path -LiteralPath $builtExe)) {
-    throw "PyInstaller did not generate the executable."
+$missingTrainingDeps = & $PythonExe -c "import importlib.util; required=('torch','datasets','transformers','peft'); missing=[name for name in required if importlib.util.find_spec(name) is None]; print(','.join(missing))"
+if ($LASTEXITCODE -ne 0) {
+    throw "Could not verify Python dependencies before packaging."
 }
 
-Copy-Item -LiteralPath $builtExe -Destination $targetExe -Force
-Write-Host "Executable copied to $targetExe"
+if ($missingTrainingDeps) {
+    throw "Missing training dependencies for a complete build: $missingTrainingDeps. Run '$PythonExe -m pip install -e .' before packaging."
+}
+
+$pyInstallerArgs = @(
+    "-m",
+    "PyInstaller",
+    "--noconfirm",
+    "--clean",
+    "--onefile",
+    "--windowed",
+    "--name",
+    "llmstudio",
+    "--distpath",
+    $root,
+    "--workpath",
+    (Join-Path $root "build\\pyinstaller"),
+    "--specpath",
+    (Join-Path $root "build\\pyinstaller"),
+    "--icon",
+    $iconFile.FullName,
+    "--hidden-import",
+    "torch",
+    "--hidden-import",
+    "datasets",
+    "--hidden-import",
+    "transformers",
+    "--hidden-import",
+    "peft",
+    $entryScript
+)
+
+& $PythonExe @pyInstallerArgs
+if ($LASTEXITCODE -ne 0) {
+    throw "PyInstaller failed."
+}
+
+# Build directly into the repository root so the .exe sits next to llmstudio.py.
+$targetExe = Join-Path $root "llmstudio.exe"
+
+if (-not (Test-Path -LiteralPath $targetExe)) {
+    throw "PyInstaller did not generate the executable."
+}
+Write-Host "Executable created at $targetExe"

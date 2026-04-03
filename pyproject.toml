@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "deepseek-coder-studio"
-version = "0.2.0"
+version = "0.3.0"
 description = "Fine-tuning, evaluation, inference and VS Code integration for code LLM workflows."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -24,6 +24,7 @@ dependencies = [
   "accelerate>=1.5.2",
   "datasets>=3.4.1",
   "fastapi>=0.116.1",
+  "huggingface_hub>=1.4.0",
   "httpx>=0.28.1",
   "orjson>=3.11.0",
   "pandas>=2.3.0",

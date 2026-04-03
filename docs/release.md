@@ -21,6 +21,12 @@ python scripts/bump_version.py --set-version 1.0.0
 
 The bump script also updates the visible README version, the API version test, and versioned training job names so releases stay aligned.
 
+Release discipline for this repository:
+
+- Bump the version before every commit pushed to `main`.
+- Keep the visible Git tag format as `Vx.x.x`.
+- Do not reuse an existing release tag for a new commit.
+
 ## GitHub release workflow
 
 Every push to `main` triggers `.github/workflows/release.yml`.
@@ -35,4 +41,4 @@ The workflow:
 
 GitHub tags and releases use the visible format `Vx.x.x`, while package metadata keeps the numeric semver form `x.x.x` required by Python and npm tooling.
 
-Manual tags are also supported. If you create and push `Vx.x.x` yourself, the workflow reuses that tag instead of failing.
+The workflow now fails fast if the target `Vx.x.x` tag already exists, enforcing a fresh version for every release commit pushed to `main`.

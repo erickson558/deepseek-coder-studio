@@ -2,7 +2,7 @@
 
 DeepSeek Coder Studio is a production-oriented starter platform for fine-tuning and serving a coding LLM based on `deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct`. It now includes a desktop GUI for Windows-friendly operation, plus dataset preparation, LoRA/QLoRA training, evaluation, local or remote inference, a FastAPI backend, and a VS Code extension that consumes the backend from inside the editor.
 
-Version: `V0.2.0`
+Version: `V0.3.0`
 
 License: Apache License 2.0
 
@@ -86,9 +86,11 @@ This baseline is prepared to evolve toward RAG, multi-file context, Git-aware wo
 python -m venv .venv
 .venv\Scripts\activate
 pip install --upgrade pip
-pip install -r requirements.txt
+python -m pip install -e .
 copy .env.example .env
 ```
+
+`pyproject.toml` is the primary dependency source. `requirements.txt` is kept as a convenience mirror for environments that prefer flat requirements files.
 
 ### Desktop GUI
 
@@ -98,6 +100,19 @@ python llmstudio.py
 
 The GUI stores `config.json` and `log.txt` next to the `.py` or packaged `.exe`.
 All long-running actions execute in background threads so the window stays responsive.
+
+Recommended GUI workflow:
+
+1. Prepare the dataset from the `Operations` tab.
+2. Review the guided training form, validate the setup and launch training.
+3. Let the GUI generate the YAML it will use for the job.
+4. Publish the adapter or merged model to Hugging Face after training finishes.
+
+To publish from the GUI, export a Hugging Face token first:
+
+```bash
+set HF_TOKEN=hf_xxx
+```
 
 ### VS Code extension
 
@@ -112,6 +127,10 @@ npm run compile
 - Silent desktop frontend without console windows in the packaged `.exe`
 - Start/stop/check the FastAPI backend from the GUI
 - Prepare datasets, launch training and run evaluation from tabs
+- Guided training form for base model, processed train/validation splits and core hyperparameters
+- Pre-flight validation for dataset paths, dependencies and QLoRA constraints
+- Save the current GUI training form as YAML before launching the job
+- Publish either the adapter folder or the merged model directly to Hugging Face
 - Local inference panel for prompts and task-specific coding requests
 - Auto-save of GUI preferences to `config.json`
 - File logging to `log.txt`
@@ -230,13 +249,19 @@ Supported task families:
 
 The project includes a PowerShell build script that compiles the GUI entrypoint `llmstudio.py` into `llmstudio.exe` in the same folder as the `.py` file, using the `.ico` file found at the repository root and packaging it without an attached console window.
 
+Install the project dependencies first so PyInstaller can bundle the training stack correctly:
+
+```bash
+python -m pip install -e .
+```
+
 ```bash
 powershell -ExecutionPolicy Bypass -File scripts/build_exe.ps1
 ```
 
 ## Versioning
 
-Semantic versioning is centralized and must be bumped before every commit that should produce a new GitHub release.
+Semantic versioning is centralized and must be bumped before every commit pushed to `main`.
 
 ```bash
 python scripts/bump_version.py patch
@@ -252,6 +277,12 @@ Current synced locations:
 
 Visible Git tags and GitHub releases use the `Vx.x.x` format. Tooling files that require strict semver keep the numeric form `x.x.x`.
 
+Best practice used in this repository:
+
+- Every commit pushed to `main` must carry a new version.
+- `VERSION` is the source of truth and is mirrored to the app, packaging metadata, tests and docs.
+- The release workflow fails if the target `Vx.x.x` tag already exists, which prevents accidental duplicate releases.
+
 ## GitHub best practices included
 
 - Apache License 2.0
@@ -266,6 +297,7 @@ Visible Git tags and GitHub releases use the `Vx.x.x` format. Tooling files that
 
 - If `/generate` or `/chat` fails immediately, check that the model path or adapter path exists and that `torch`, `transformers` and `peft` are installed.
 - On Windows, prefer LoRA for local development; QLoRA usually requires Linux plus compatible CUDA and `bitsandbytes`.
+- If GUI publishing fails, verify that `HF_TOKEN` is set and that the target repo id uses the `owner/name` format.
 - If the VS Code extension cannot connect, verify `deepseekCoderStudio.backendUrl`, `timeoutMs` and optional `apiKey`.
 - If release creation fails in GitHub Actions, confirm that `VERSION` was bumped before pushing to `main`.
 

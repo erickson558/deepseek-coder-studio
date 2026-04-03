@@ -21,6 +21,7 @@ from app.models.api import ChatRequest, GenerateRequest, GenerationParameters, T
 from app.models.dataset import Message
 from app.models.task import TaskType
 from app.services.assistant import AssistantService
+from app.training.hub import publish_training_artifacts
 from app.training.trainer import FineTuneRunner
 
 LOGGER = get_logger(__name__)
@@ -182,6 +183,23 @@ def run_training(config_path: str) -> dict[str, Any]:
 def run_evaluation(config_path: str) -> dict[str, Any]:
     """Execute evaluation through the shared benchmark runner."""
     return EvaluationRunner().run(config_path)
+
+
+def run_publish_model(
+    repo_id: str,
+    source_dir: str,
+    token_env_var: str = "HF_TOKEN",
+    private: bool = False,
+    artifact_type: str = "adapter",
+) -> dict[str, Any]:
+    """Publish a trained artifact folder to the Hugging Face Hub."""
+    return publish_training_artifacts(
+        repo_id=repo_id,
+        source_dir=source_dir,
+        token_env_var=token_env_var,
+        private=private,
+        artifact_type=artifact_type,
+    )
 
 
 def run_inference(

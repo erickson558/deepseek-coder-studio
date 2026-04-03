@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 import sys
 import time
 import tkinter as tk
@@ -19,14 +20,22 @@ from app.gui.tasks import (
     ApiServerController,
     BackgroundTaskRunner,
     TaskResult,
+    run_publish_model,
     run_evaluation,
     run_inference,
     run_prepare_dataset,
     run_training,
 )
 from app.models.task import TaskType
+from app.models.training import TrainingJobConfig
+from app.training.config import load_training_config, save_training_config
+from app.training.validation import validate_training_job_config
 
 LOGGER = get_logger(__name__)
+TEXT_EDITOR_SUFFIXES = {".cfg", ".ini", ".json", ".log", ".md", ".txt", ".toml", ".yaml", ".yml"}
+TRAINING_STRATEGIES = ("lora", "qlora")
+PUBLISH_ARTIFACT_TYPES = ("adapter", "merged")
+GENERATED_TRAINING_CONFIG_PATH = Path("configs/training/gui-generated.yaml")
 
 
 def parse_positive_int(value: str, fallback: int) -> int:
@@ -35,6 +44,52 @@ def parse_positive_int(value: str, fallback: int) -> int:
         return max(int(value.strip() or str(fallback)), 1)
     except (TypeError, ValueError):
         return fallback
+
+
+def parse_positive_float(value: str, fallback: float) -> float:
+    """Safely parse a positive float while the user edits text fields."""
+    try:
+        return max(float(value.strip() or str(fallback)), 1e-12)
+    except (TypeError, ValueError):
+        return fallback
+
+
+def open_path_with_os(path: Path) -> None:
+    """Open a file with the platform shell and use editor fallbacks on Windows."""
+    if sys.platform.startswith("win"):
+        _open_path_windows(path)
+        return
+    LOGGER.info("Path ready at %s", path)
+
+
+def _open_path_windows(path: Path) -> None:
+    """Open a path on Windows, falling back to Notepad or Explorer when needed."""
+    last_error: OSError | None = None
+    startfile = getattr(os, "startfile", None)
+    if startfile is not None:
+        try:
+            startfile(str(path))
+            return
+        except OSError as exc:
+            last_error = exc
+
+    if path.is_file() and path.suffix.lower() in TEXT_EDITOR_SUFFIXES:
+        try:
+            subprocess.Popen(["notepad.exe", str(path)])
+            return
+        except OSError as exc:
+            last_error = exc
+
+    try:
+        explorer_target = str(path) if path.is_dir() else f"/select,{path}"
+        subprocess.Popen(["explorer.exe", explorer_target])
+        return
+    except OSError as exc:
+        last_error = exc
+
+    if last_error is not None:
+        raise last_error
+    raise OSError(f"Failed to open {path}")
 
 
 class LLMStudioWindow(tk.Tk):
@@ -63,6 +118,7 @@ class LLMStudioWindow(tk.Tk):
         self._restore_geometry()
         self._refresh_log_view()
         self._sync_backend_badge()
+        self._sync_publish_source_from_last_training()
 
         # Poll background work and countdown from the Tk event loop.
         self.after(200, self._poll_background_results)
@@ -82,7 +138,25 @@ class LLMStudioWindow(tk.Tk):
         self.dataset_input_var = tk.StringVar(value=self.gui_config.dataset_input_path)
         self.dataset_output_var = tk.StringVar(value=self.gui_config.dataset_output_path)
         self.training_config_var = tk.StringVar(value=self.gui_config.training_config_path)
+        self.training_job_name_var = tk.StringVar(value=self.gui_config.training_job_name)
+        self.training_strategy_var = tk.StringVar(value=self.gui_config.training_strategy)
+        self.training_base_model_var = tk.StringVar(value=self.gui_config.training_base_model)
+        self.training_train_file_var = tk.StringVar(value=self.gui_config.training_train_file)
+        self.training_validation_file_var = tk.StringVar(value=self.gui_config.training_validation_file)
+        self.training_num_train_epochs_var = tk.StringVar(value=str(self.gui_config.training_num_train_epochs))
+        self.training_per_device_train_batch_size_var = tk.StringVar(value=str(self.gui_config.training_per_device_train_batch_size))
+        self.training_gradient_accumulation_steps_var = tk.StringVar(value=str(self.gui_config.training_gradient_accumulation_steps))
+        self.training_learning_rate_var = tk.StringVar(value=str(self.gui_config.training_learning_rate))
+        self.training_max_seq_length_var = tk.StringVar(value=str(self.gui_config.training_max_seq_length))
+        self.training_merge_adapter_var = tk.BooleanVar(value=self.gui_config.training_merge_adapter)
         self.evaluation_config_var = tk.StringVar(value=self.gui_config.evaluation_config_path)
+        self.publish_repo_id_var = tk.StringVar(value=self.gui_config.publish_repo_id)
+        self.publish_token_env_var = tk.StringVar(value=self.gui_config.publish_token_env_var)
+        self.publish_private_repo_var = tk.BooleanVar(value=self.gui_config.publish_private_repo)
+        self.publish_artifact_type_var = tk.StringVar(value=self.gui_config.publish_artifact_type)
+        self.publish_source_dir_var = tk.StringVar(value=self.gui_config.publish_source_dir)
+        self.last_adapter_output_dir_var = tk.StringVar(value=self.gui_config.last_adapter_output_dir)
+        self.last_merged_output_dir_var = tk.StringVar(value=self.gui_config.last_merged_output_dir)
         self.inference_task_var = tk.StringVar(value=self.gui_config.inference_task)
         self.inference_language_var = tk.StringVar(value=self.gui_config.inference_language)
         self.inference_context_file_var = tk.StringVar(value=self.gui_config.inference_context_file)
@@ -97,7 +171,7 @@ class LLMStudioWindow(tk.Tk):
     def _configure_window(self) -> None:
         """Configure top-level window metadata and close behavior."""
         self.title("DeepSeek Coder Studio")
-        self.minsize(1100, 760)
+        self.minsize(1180, 860)
         self.protocol("WM_DELETE_WINDOW", self.request_close)
 
     def _configure_style(self) -> None:
@@ -249,6 +323,7 @@ class LLMStudioWindow(tk.Tk):
         dataset_card = ttk.LabelFrame(self.operations_tab, style="Section.TLabelframe", padding=16)
         dataset_card.pack(fill="x", pady=(0, 12))
         self.dataset_card = dataset_card
+        dataset_card.columnconfigure(1, weight=1)
 
         self.dataset_input_label = ttk.Label(dataset_card)
         self.dataset_input_label.grid(row=0, column=0, sticky="w")
@@ -268,19 +343,134 @@ class LLMStudioWindow(tk.Tk):
         training_card = ttk.LabelFrame(self.operations_tab, style="Section.TLabelframe", padding=16)
         training_card.pack(fill="x", pady=(0, 12))
         self.training_card = training_card
+        training_card.columnconfigure(0, weight=1)
 
-        self.training_config_label = ttk.Label(training_card)
-        self.training_config_label.grid(row=0, column=0, sticky="w")
-        ttk.Entry(training_card, textvariable=self.training_config_var, width=82).grid(row=0, column=1, padx=10, sticky="ew")
-        self.training_config_browse_button = ttk.Button(training_card, style="Secondary.TButton", command=self.browse_training_config)
-        self.training_config_browse_button.grid(row=0, column=2, sticky="e")
+        guided_card = ttk.LabelFrame(training_card, style="Section.TLabelframe", padding=12)
+        guided_card.grid(row=0, column=0, sticky="ew")
+        self.training_quick_card = guided_card
+        guided_card.columnconfigure(1, weight=1)
+        guided_card.columnconfigure(3, weight=1)
 
-        self.training_button = ttk.Button(training_card, style="Accent.TButton", command=self.train_model_job)
-        self.training_button.grid(row=1, column=1, pady=(12, 0), sticky="w")
+        self.training_job_name_label = ttk.Label(guided_card)
+        self.training_job_name_label.grid(row=0, column=0, sticky="w")
+        ttk.Entry(guided_card, textvariable=self.training_job_name_var, width=32).grid(row=0, column=1, padx=(10, 18), sticky="ew")
+
+        self.training_strategy_label = ttk.Label(guided_card)
+        self.training_strategy_label.grid(row=0, column=2, sticky="w")
+        ttk.Combobox(
+            guided_card,
+            textvariable=self.training_strategy_var,
+            values=TRAINING_STRATEGIES,
+            state="readonly",
+            width=14,
+        ).grid(row=0, column=3, padx=(10, 0), sticky="w")
+
+        self.training_base_model_label = ttk.Label(guided_card)
+        self.training_base_model_label.grid(row=1, column=0, sticky="w", pady=(10, 0))
+        ttk.Entry(guided_card, textvariable=self.training_base_model_var, width=82).grid(
+            row=1,
+            column=1,
+            columnspan=3,
+            padx=(10, 0),
+            pady=(10, 0),
+            sticky="ew",
+        )
+
+        self.training_train_file_label = ttk.Label(guided_card)
+        self.training_train_file_label.grid(row=2, column=0, sticky="w", pady=(10, 0))
+        ttk.Entry(guided_card, textvariable=self.training_train_file_var, width=68).grid(
+            row=2,
+            column=1,
+            columnspan=2,
+            padx=(10, 10),
+            pady=(10, 0),
+            sticky="ew",
+        )
+        self.training_train_file_browse_button = ttk.Button(
+            guided_card,
+            style="Secondary.TButton",
+            command=self.browse_training_train_file,
+        )
+        self.training_train_file_browse_button.grid(row=2, column=3, pady=(10, 0), sticky="e")
+
+        self.training_validation_file_label = ttk.Label(guided_card)
+        self.training_validation_file_label.grid(row=3, column=0, sticky="w", pady=(8, 0))
+        ttk.Entry(guided_card, textvariable=self.training_validation_file_var, width=68).grid(
+            row=3,
+            column=1,
+            columnspan=2,
+            padx=(10, 10),
+            pady=(8, 0),
+            sticky="ew",
+        )
+        self.training_validation_file_browse_button = ttk.Button(
+            guided_card,
+            style="Secondary.TButton",
+            command=self.browse_training_validation_file,
+        )
+        self.training_validation_file_browse_button.grid(row=3, column=3, pady=(8, 0), sticky="e")
+
+        self.training_max_seq_length_label = ttk.Label(guided_card)
+        self.training_max_seq_length_label.grid(row=4, column=0, sticky="w", pady=(10, 0))
+        ttk.Entry(guided_card, width=10, textvariable=self.training_max_seq_length_var).grid(row=4, column=1, padx=(10, 18), pady=(10, 0), sticky="w")
+
+        self.training_num_train_epochs_label = ttk.Label(guided_card)
+        self.training_num_train_epochs_label.grid(row=4, column=2, sticky="w", pady=(10, 0))
+        ttk.Entry(guided_card, width=8, textvariable=self.training_num_train_epochs_var).grid(row=4, column=3, padx=(10, 0), pady=(10, 0), sticky="w")
+
+        self.training_batch_size_label = ttk.Label(guided_card)
+        self.training_batch_size_label.grid(row=5, column=0, sticky="w", pady=(8, 0))
+        ttk.Entry(guided_card, width=10, textvariable=self.training_per_device_train_batch_size_var).grid(row=5, column=1, padx=(10, 18), pady=(8, 0), sticky="w")
+
+        self.training_gradient_accumulation_steps_label = ttk.Label(guided_card)
+        self.training_gradient_accumulation_steps_label.grid(row=5, column=2, sticky="w", pady=(8, 0))
+        ttk.Entry(guided_card, width=8, textvariable=self.training_gradient_accumulation_steps_var).grid(row=5, column=3, padx=(10, 0), pady=(8, 0), sticky="w")
+
+        self.training_learning_rate_label = ttk.Label(guided_card)
+        self.training_learning_rate_label.grid(row=6, column=0, sticky="w", pady=(8, 0))
+        ttk.Entry(guided_card, width=14, textvariable=self.training_learning_rate_var).grid(row=6, column=1, padx=(10, 18), pady=(8, 0), sticky="w")
+
+        self.training_merge_adapter_button = ttk.Checkbutton(guided_card, variable=self.training_merge_adapter_var)
+        self.training_merge_adapter_button.grid(row=6, column=2, columnspan=2, pady=(8, 0), sticky="w")
+
+        self.training_config_label = ttk.Label(guided_card)
+        self.training_config_label.grid(row=7, column=0, sticky="w", pady=(10, 0))
+        ttk.Entry(guided_card, textvariable=self.training_config_var, width=68).grid(
+            row=7,
+            column=1,
+            columnspan=2,
+            padx=(10, 10),
+            pady=(10, 0),
+            sticky="ew",
+        )
+        self.training_config_browse_button = ttk.Button(
+            guided_card,
+            style="Secondary.TButton",
+            command=self.browse_training_config,
+        )
+        self.training_config_browse_button.grid(row=7, column=3, pady=(10, 0), sticky="e")
+
+        training_button_row = ttk.Frame(guided_card)
+        training_button_row.grid(row=8, column=1, columnspan=3, sticky="w", pady=(12, 0))
+        self.save_training_config_button = ttk.Button(
+            training_button_row,
+            style="Secondary.TButton",
+            command=self.save_training_config_file,
+        )
+        self.save_training_config_button.pack(side="left")
+        self.validate_training_button = ttk.Button(
+            training_button_row,
+            style="Secondary.TButton",
+            command=self.validate_training_setup_action,
+        )
+        self.validate_training_button.pack(side="left", padx=(8, 8))
+        self.training_button = ttk.Button(training_button_row, style="Accent.TButton", command=self.train_model_job)
+        self.training_button.pack(side="left")
 
         evaluation_card = ttk.LabelFrame(self.operations_tab, style="Section.TLabelframe", padding=16)
-        evaluation_card.pack(fill="x")
+        evaluation_card.pack(fill="x", pady=(0, 12))
         self.evaluation_card = evaluation_card
+        evaluation_card.columnconfigure(1, weight=1)
 
         self.evaluation_config_label = ttk.Label(evaluation_card)
         self.evaluation_config_label.grid(row=0, column=0, sticky="w")
@@ -290,6 +480,57 @@ class LLMStudioWindow(tk.Tk):
 
         self.evaluation_button = ttk.Button(evaluation_card, style="Accent.TButton", command=self.evaluate_model_job)
         self.evaluation_button.grid(row=1, column=1, pady=(12, 0), sticky="w")
+
+        publish_card = ttk.LabelFrame(self.operations_tab, style="Section.TLabelframe", padding=16)
+        publish_card.pack(fill="x")
+        self.publish_card = publish_card
+        publish_card.columnconfigure(1, weight=1)
+
+        self.publish_source_dir_label = ttk.Label(publish_card)
+        self.publish_source_dir_label.grid(row=0, column=0, sticky="w")
+        ttk.Entry(publish_card, textvariable=self.publish_source_dir_var, width=82).grid(row=0, column=1, padx=10, sticky="ew")
+        self.publish_source_dir_browse_button = ttk.Button(
+            publish_card,
+            style="Secondary.TButton",
+            command=self.browse_publish_source_dir,
+        )
+        self.publish_source_dir_browse_button.grid(row=0, column=2, sticky="e")
+
+        self.publish_repo_id_label = ttk.Label(publish_card)
+        self.publish_repo_id_label.grid(row=1, column=0, sticky="w", pady=(8, 0))
+        ttk.Entry(publish_card, textvariable=self.publish_repo_id_var, width=36).grid(
+            row=1,
+            column=1,
+            padx=10,
+            pady=(8, 0),
+            sticky="w",
+        )
+
+        self.publish_artifact_type_label = ttk.Label(publish_card)
+        self.publish_artifact_type_label.grid(row=1, column=2, sticky="w", pady=(8, 0))
+        ttk.Combobox(
+            publish_card,
+            textvariable=self.publish_artifact_type_var,
+            values=PUBLISH_ARTIFACT_TYPES,
+            state="readonly",
+            width=14,
+        ).grid(row=1, column=3, padx=(10, 0), pady=(8, 0), sticky="w")
+
+        self.publish_token_env_var_label = ttk.Label(publish_card)
+        self.publish_token_env_var_label.grid(row=2, column=0, sticky="w", pady=(8, 0))
+        ttk.Entry(publish_card, textvariable=self.publish_token_env_var, width=18).grid(
+            row=2,
+            column=1,
+            padx=10,
+            pady=(8, 0),
+            sticky="w",
+        )
+
+        self.publish_private_repo_button = ttk.Checkbutton(publish_card, variable=self.publish_private_repo_var)
+        self.publish_private_repo_button.grid(row=2, column=2, columnspan=2, pady=(8, 0), sticky="w")
+
+        self.publish_button = ttk.Button(publish_card, style="Accent.TButton", command=self.publish_model_job)
+        self.publish_button.grid(row=3, column=1, pady=(12, 0), sticky="w")
 
     def _build_assistant_tab(self) -> None:
         """Create local inference controls and result viewers."""
@@ -395,13 +636,32 @@ class LLMStudioWindow(tk.Tk):
             self.dataset_input_var,
             self.dataset_output_var,
             self.training_config_var,
+            self.training_job_name_var,
+            self.training_strategy_var,
+            self.training_base_model_var,
+            self.training_train_file_var,
+            self.training_validation_file_var,
+            self.training_num_train_epochs_var,
+            self.training_per_device_train_batch_size_var,
+            self.training_gradient_accumulation_steps_var,
+            self.training_learning_rate_var,
+            self.training_max_seq_length_var,
+            self.training_merge_adapter_var,
             self.evaluation_config_var,
+            self.publish_repo_id_var,
+            self.publish_token_env_var,
+            self.publish_private_repo_var,
+            self.publish_artifact_type_var,
+            self.publish_source_dir_var,
+            self.last_adapter_output_dir_var,
+            self.last_merged_output_dir_var,
             self.inference_task_var,
             self.inference_language_var,
             self.inference_context_file_var,
         ]
         for variable in tracked_vars:
             variable.trace_add("write", self._on_variable_changed)
+        self.publish_artifact_type_var.trace_add("write", self._on_publish_artifact_changed)
 
         # Save prompt changes without forcing the user to click a save button.
         self.prompt_text.bind("<KeyRelease>", self._on_prompt_changed)
@@ -461,14 +721,39 @@ class LLMStudioWindow(tk.Tk):
         self.prepare_dataset_button.configure(text=self._t("run_prepare_dataset"))
 
         self.training_card.configure(text=self._t("training_group"))
+        self.training_quick_card.configure(text=self._t("training_quick_group"))
+        self.training_job_name_label.configure(text=self._t("training_job_name"))
+        self.training_strategy_label.configure(text=self._t("training_strategy"))
+        self.training_base_model_label.configure(text=self._t("base_model"))
+        self.training_train_file_label.configure(text=self._t("train_file"))
+        self.training_validation_file_label.configure(text=self._t("validation_file"))
+        self.training_max_seq_length_label.configure(text=self._t("max_seq_length"))
+        self.training_num_train_epochs_label.configure(text=self._t("num_train_epochs"))
+        self.training_batch_size_label.configure(text=self._t("per_device_train_batch_size"))
+        self.training_gradient_accumulation_steps_label.configure(text=self._t("gradient_accumulation_steps"))
+        self.training_learning_rate_label.configure(text=self._t("learning_rate"))
+        self.training_merge_adapter_button.configure(text=self._t("merge_adapter"))
         self.training_config_label.configure(text=self._t("training_config"))
         self.training_config_browse_button.configure(text=self._t("browse_file"))
-        self.training_button.configure(text=self._t("run_training"))
+        self.training_train_file_browse_button.configure(text=self._t("browse_file"))
+        self.training_validation_file_browse_button.configure(text=self._t("browse_file"))
+        self.save_training_config_button.configure(text=self._t("save_training_config"))
+        self.validate_training_button.configure(text=self._t("validate_training_setup"))
+        self.training_button.configure(text=self._t("guided_train_model"))
 
         self.evaluation_card.configure(text=self._t("evaluation_group"))
         self.evaluation_config_label.configure(text=self._t("evaluation_config"))
         self.evaluation_config_browse_button.configure(text=self._t("browse_file"))
         self.evaluation_button.configure(text=self._t("run_evaluation"))
+
+        self.publish_card.configure(text=self._t("publish_group"))
+        self.publish_source_dir_label.configure(text=self._t("publish_source_dir"))
+        self.publish_source_dir_browse_button.configure(text=self._t("browse_dir"))
+        self.publish_repo_id_label.configure(text=self._t("publish_repo_id"))
+        self.publish_artifact_type_label.configure(text=self._t("publish_artifact_type"))
+        self.publish_token_env_var_label.configure(text=self._t("publish_token_env_var"))
+        self.publish_private_repo_button.configure(text=self._t("publish_private_repo"))
+        self.publish_button.configure(text=self._t("publish_to_hub"))
 
         self.assistant_card.configure(text=self._t("assistant_group"))
         self.inference_task_label.configure(text=self._t("task"))
@@ -516,6 +801,10 @@ class LLMStudioWindow(tk.Tk):
         self._apply_translations()
         self._save_config()
 
+    def _on_publish_artifact_changed(self, *_: object) -> None:
+        """Keep the publish source aligned with the latest training outputs."""
+        self._sync_publish_source_from_last_training()
+
     def _on_prompt_changed(self, _: tk.Event[tk.Text]) -> None:
         """Persist prompt text as the user types."""
         self._record_activity()
@@ -550,7 +839,40 @@ class LLMStudioWindow(tk.Tk):
             dataset_input_path=self.dataset_input_var.get().strip(),
             dataset_output_path=self.dataset_output_var.get().strip(),
             training_config_path=self.training_config_var.get().strip(),
+            training_job_name=self.training_job_name_var.get().strip(),
+            training_strategy=self.training_strategy_var.get().strip(),
+            training_base_model=self.training_base_model_var.get().strip(),
+            training_train_file=self.training_train_file_var.get().strip(),
+            training_validation_file=self.training_validation_file_var.get().strip(),
+            training_num_train_epochs=parse_positive_int(
+                self.training_num_train_epochs_var.get(),
+                self.gui_config.training_num_train_epochs,
+            ),
+            training_per_device_train_batch_size=parse_positive_int(
+                self.training_per_device_train_batch_size_var.get(),
+                self.gui_config.training_per_device_train_batch_size,
+            ),
+            training_gradient_accumulation_steps=parse_positive_int(
+                self.training_gradient_accumulation_steps_var.get(),
+                self.gui_config.training_gradient_accumulation_steps,
+            ),
+            training_learning_rate=parse_positive_float(
+                self.training_learning_rate_var.get(),
+                self.gui_config.training_learning_rate,
+            ),
+            training_max_seq_length=parse_positive_int(
+                self.training_max_seq_length_var.get(),
+                self.gui_config.training_max_seq_length,
+            ),
+            training_merge_adapter=self.training_merge_adapter_var.get(),
             evaluation_config_path=self.evaluation_config_var.get().strip(),
+            publish_repo_id=self.publish_repo_id_var.get().strip(),
+            publish_token_env_var=self.publish_token_env_var.get().strip() or "HF_TOKEN",
+            publish_private_repo=self.publish_private_repo_var.get(),
+            publish_artifact_type=self.publish_artifact_type_var.get().strip() or "adapter",
+            publish_source_dir=self.publish_source_dir_var.get().strip(),
+            last_adapter_output_dir=self.last_adapter_output_dir_var.get().strip(),
+            last_merged_output_dir=self.last_merged_output_dir_var.get().strip(),
             inference_task=self.inference_task_var.get().strip(),
             inference_language=self.inference_language_var.get().strip(),
             inference_prompt=self.prompt_text.get("1.0", "end").strip(),
@@ -645,6 +967,9 @@ class LLMStudioWindow(tk.Tk):
 
         if result.name == "prepare_dataset":
             splits = result.payload["splits"]
+            output_dir = Path(self.dataset_output_var.get().strip() or "data/processed")
+            self.training_train_file_var.set(str(output_dir / "train.jsonl"))
+            self.training_validation_file_var.set(str(output_dir / "validation.jsonl"))
             self._set_status(
                 self._t(
                     "status_prepare_success",
@@ -656,12 +981,19 @@ class LLMStudioWindow(tk.Tk):
             return
 
         if result.name == "train_model":
+            self.last_adapter_output_dir_var.set(result.payload["adapter_output_dir"] or "")
+            self.last_merged_output_dir_var.set(result.payload["merged_output_dir"] or "")
+            self._sync_publish_source_from_last_training(force=True)
             self._set_status(self._t("status_training_success", path=result.payload["adapter_output_dir"]))
             return
 
         if result.name == "evaluate_model":
             score = result.payload["summary"]["average_score"]
             self._set_status(self._t("status_evaluation_success", score=score))
+            return
+
+        if result.name == "publish_model":
+            self._set_status(self._t("status_publish_success", url=result.payload["repo_url"]))
             return
 
         if result.name == "run_inference":
@@ -725,6 +1057,144 @@ class LLMStudioWindow(tk.Tk):
         self.log_text.insert("1.0", content)
         self.log_text.configure(state="disabled")
 
+    def _build_guided_training_config(self) -> TrainingJobConfig:
+        """Build a validated training config directly from the GUI form."""
+        strategy = self.training_strategy_var.get().strip() or "lora"
+        if strategy not in TRAINING_STRATEGIES:
+            strategy = "lora"
+
+        train_batch_size = parse_positive_int(
+            self.training_per_device_train_batch_size_var.get(),
+            self.gui_config.training_per_device_train_batch_size,
+        )
+        return TrainingJobConfig.model_validate(
+            {
+                "job_name": self.training_job_name_var.get().strip() or f"llmstudio-{strategy}-job",
+                "strategy": strategy,
+                "base_model": self.training_base_model_var.get().strip(),
+                "train_file": self.training_train_file_var.get().strip(),
+                "validation_file": self.training_validation_file_var.get().strip(),
+                "max_seq_length": parse_positive_int(
+                    self.training_max_seq_length_var.get(),
+                    self.gui_config.training_max_seq_length,
+                ),
+                "num_train_epochs": parse_positive_int(
+                    self.training_num_train_epochs_var.get(),
+                    self.gui_config.training_num_train_epochs,
+                ),
+                "per_device_train_batch_size": train_batch_size,
+                "per_device_eval_batch_size": train_batch_size,
+                "gradient_accumulation_steps": parse_positive_int(
+                    self.training_gradient_accumulation_steps_var.get(),
+                    self.gui_config.training_gradient_accumulation_steps,
+                ),
+                "learning_rate": parse_positive_float(
+                    self.training_learning_rate_var.get(),
+                    self.gui_config.training_learning_rate,
+                ),
+                "eval_steps": 50,
+                "save_steps": 50,
+                "merge_adapter": self.training_merge_adapter_var.get(),
+                "bf16": strategy == "qlora" and not sys.platform.startswith("win"),
+            }
+        )
+
+    def _resolve_training_config_path(self) -> Path:
+        """Choose a safe YAML path for GUI-generated training configs."""
+        configured_path = Path(self.training_config_var.get().strip()) if self.training_config_var.get().strip() else GENERATED_TRAINING_CONFIG_PATH
+        sample_paths = {
+            Path("configs/training/lora.yaml"),
+            Path("configs/training/qlora.yaml"),
+        }
+        target = GENERATED_TRAINING_CONFIG_PATH if configured_path in sample_paths else configured_path
+        self.training_config_var.set(str(target))
+        return target
+
+    def _save_guided_training_config(self, *, show_status: bool = True) -> Path:
+        """Persist the current GUI training form to a YAML file."""
+        config = self._build_guided_training_config()
+        target_path = save_training_config(self._resolve_training_config_path(), config)
+        if show_status:
+            self._set_status(self._t("status_training_config_saved", path=target_path))
+        return target_path
+
+    def _load_training_form_from_config(self, config_path: str) -> None:
+        """Populate the guided training form from an existing YAML config."""
+        if not config_path.strip():
+            return
+        try:
+            config = load_training_config(config_path)
+        except Exception:  # noqa: BLE001
+            LOGGER.exception("Failed to load training config from %s", config_path)
+            self._set_status(self._t("status_error", message=config_path), level="warning")
+            return
+
+        self.training_job_name_var.set(config.job_name)
+        self.training_strategy_var.set(config.strategy)
+        self.training_base_model_var.set(config.base_model)
+        self.training_train_file_var.set(str(config.train_file))
+        self.training_validation_file_var.set(str(config.validation_file))
+        self.training_num_train_epochs_var.set(str(config.num_train_epochs))
+        self.training_per_device_train_batch_size_var.set(str(config.per_device_train_batch_size))
+        self.training_gradient_accumulation_steps_var.set(str(config.gradient_accumulation_steps))
+        self.training_learning_rate_var.set(str(config.learning_rate))
+        self.training_max_seq_length_var.set(str(config.max_seq_length))
+        self.training_merge_adapter_var.set(config.merge_adapter)
+
+    def _sync_publish_source_from_last_training(self, *, force: bool = False) -> None:
+        """Auto-fill the publish folder from the most recent training outputs."""
+        current = self.publish_source_dir_var.get().strip()
+        known_paths = {
+            "",
+            self.last_adapter_output_dir_var.get().strip(),
+            self.last_merged_output_dir_var.get().strip(),
+        }
+        if not force and current not in known_paths:
+            return
+
+        artifact_type = self.publish_artifact_type_var.get().strip() or "adapter"
+        preferred_path = ""
+        if artifact_type == "merged":
+            preferred_path = self.last_merged_output_dir_var.get().strip() or self.last_adapter_output_dir_var.get().strip()
+        else:
+            preferred_path = self.last_adapter_output_dir_var.get().strip() or self.last_merged_output_dir_var.get().strip()
+
+        if preferred_path:
+            self.publish_source_dir_var.set(preferred_path)
+
+    def validate_training_setup_action(self) -> dict[str, object] | None:
+        """Validate the current training form and show a concise summary."""
+        try:
+            config = self._build_guided_training_config()
+        except Exception as exc:  # noqa: BLE001
+            self._set_status(self._t("status_validation_error", message=str(exc)), level="error")
+            return None
+
+        report = validate_training_job_config(config)
+        errors = [check["message"] for check in report["checks"] if check["status"] == "error"]
+        warnings = [check["message"] for check in report["checks"] if check["status"] == "warning"]
+
+        if errors:
+            self._set_status(
+                self._t("status_validation_error", message="; ".join(errors[:2])),
+                level="error",
+            )
+        elif warnings:
+            self._set_status(
+                self._t("status_validation_warning", message="; ".join(warnings[:2])),
+                level="warning",
+            )
+        else:
+            self._set_status(self._t("status_validation_success"))
+        return report
+
+    def save_training_config_file(self) -> None:
+        """Persist the guided training form to the selected YAML path."""
+        try:
+            self._save_guided_training_config()
+        except Exception as exc:  # noqa: BLE001
+            self._set_status(self._t("status_error", message=str(exc)), level="error")
+
     def browse_dataset_input(self) -> None:
         """Pick a source dataset file."""
         path = filedialog.askopenfilename(title=self._t("open_file_title"))
@@ -742,12 +1212,31 @@ class LLMStudioWindow(tk.Tk):
         path = filedialog.askopenfilename(title=self._t("open_file_title"), filetypes=[("YAML", "*.yaml *.yml"), ("All files", "*.*")])
         if path:
             self.training_config_var.set(path)
+            self._load_training_form_from_config(path)
+
+    def browse_training_train_file(self) -> None:
+        """Pick the processed train split used by the guided training form."""
+        path = filedialog.askopenfilename(title=self._t("open_file_title"), filetypes=[("JSONL", "*.jsonl"), ("All files", "*.*")])
+        if path:
+            self.training_train_file_var.set(path)
+
+    def browse_training_validation_file(self) -> None:
+        """Pick the processed validation split used by the guided training form."""
+        path = filedialog.askopenfilename(title=self._t("open_file_title"), filetypes=[("JSONL", "*.jsonl"), ("All files", "*.*")])
+        if path:
+            self.training_validation_file_var.set(path)
 
     def browse_evaluation_config(self) -> None:
         """Pick the evaluation YAML file."""
         path = filedialog.askopenfilename(title=self._t("open_file_title"), filetypes=[("YAML", "*.yaml *.yml"), ("All files", "*.*")])
         if path:
             self.evaluation_config_var.set(path)
+
+    def browse_publish_source_dir(self) -> None:
+        """Pick the adapter or merged-model folder that will be published."""
+        path = filedialog.askdirectory(title=self._t("open_dir_title"))
+        if path:
+            self.publish_source_dir_var.set(path)
 
     def browse_inference_context(self) -> None:
         """Pick an optional context file used during inference."""
@@ -762,13 +1251,40 @@ class LLMStudioWindow(tk.Tk):
 
     def train_model_job(self) -> None:
         """Launch model training in a background thread."""
+        report = self.validate_training_setup_action()
+        if report is None or not report["valid"]:
+            return
+        config_path = self._save_guided_training_config(show_status=False)
         self._set_status(self._t("status_busy"))
-        self.task_runner.submit("train_model", run_training, self.training_config_var.get())
+        self.task_runner.submit("train_model", run_training, str(config_path))
 
     def evaluate_model_job(self) -> None:
         """Run benchmark evaluation in a background thread."""
         self._set_status(self._t("status_busy"))
         self.task_runner.submit("evaluate_model", run_evaluation, self.evaluation_config_var.get())
+
+    def publish_model_job(self) -> None:
+        """Publish the selected training artifacts to the Hugging Face Hub."""
+        repo_id = self.publish_repo_id_var.get().strip()
+        if not repo_id:
+            self._set_status(self._t("status_repo_required"), level="warning")
+            return
+
+        source_dir = self.publish_source_dir_var.get().strip()
+        if not source_dir:
+            self._set_status(self._t("status_publish_source_required"), level="warning")
+            return
+
+        self._set_status(self._t("status_busy"))
+        self.task_runner.submit(
+            "publish_model",
+            run_publish_model,
+            repo_id,
+            source_dir,
+            self.publish_token_env_var.get().strip() or "HF_TOKEN",
+            self.publish_private_repo_var.get(),
+            self.publish_artifact_type_var.get().strip() or "adapter",
+        )
 
     def run_assistant_job(self) -> None:
         """Run local inference from the assistant tab."""
@@ -874,10 +1390,7 @@ class LLMStudioWindow(tk.Tk):
     def _open_path(self, path: Path) -> None:
         """Open a file using the local operating system integration."""
         try:
-            if sys.platform.startswith("win"):
-                os.startfile(path)  # type: ignore[attr-defined]
-            else:
-                LOGGER.info("Path ready at %s", path)
+            open_path_with_os(path)
         except Exception:  # noqa: BLE001
             LOGGER.exception("Failed to open %s", path)
             self._set_status(self._t("status_error", message=str(path)), level="warning")

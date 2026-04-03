@@ -21,7 +21,7 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt build
+          python -m pip install -e .[dev] build
 
       - name: Run tests
         run: pytest
@@ -70,7 +70,8 @@ jobs:
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          python -m pip install -e .
+          python -m pip install pyinstaller
 
       - name: Build executable
         shell: pwsh
@@ -93,6 +94,13 @@ jobs:
         run: |
           echo "VERSION=$(cat VERSION)" >> "$GITHUB_ENV"
           echo "RELEASE_TAG=V$(cat VERSION)" >> "$GITHUB_ENV"
+
+      - name: Ensure release tag is new
+        run: |
+          if git rev-parse "${RELEASE_TAG}" >/dev/null 2>&1; then
+            echo "Release tag ${RELEASE_TAG} already exists. Bump the project version before pushing to main."
+            exit 1
+          fi
 
       - uses: actions/download-artifact@v4
         with:

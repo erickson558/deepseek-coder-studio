@@ -13,6 +13,10 @@ def test_gui_config_store_roundtrip(tmp_path: Path) -> None:
         auto_close_seconds=90,
         host="127.0.0.1",
         port=9000,
+        training_job_name="custom-job",
+        training_strategy="qlora",
+        publish_repo_id="erickson558/custom-llm",
+        publish_artifact_type="merged",
     )
 
     store.save(config)
@@ -23,3 +27,7 @@ def test_gui_config_store_roundtrip(tmp_path: Path) -> None:
     assert loaded.auto_close_enabled is True
     assert loaded.auto_close_seconds == 90
     assert loaded.port == 9000
+    assert loaded.training_job_name == "custom-job"
+    assert loaded.training_strategy == "qlora"
+    assert loaded.publish_repo_id == "erickson558/custom-llm"
+    assert loaded.publish_artifact_type == "merged"

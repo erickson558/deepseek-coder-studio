@@ -1,5 +1,11 @@
 # Changelog
 
+## V0.3.0
+
+- Added a guided training workflow in the desktop GUI with editable hyperparameters, setup validation and YAML generation.
+- Added direct publishing of adapter or merged model artifacts to Hugging Face from the GUI, including a generated model card.
+- Hardened release discipline with synced version metadata, duplicate-tag protection in GitHub Actions and Windows executable builds emitted next to `llmstudio.py`.
+
 ## V0.2.0
 
 - Added a desktop GUI with tabs for backend control, dataset preparation, training, evaluation and local inference.

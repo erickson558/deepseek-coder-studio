@@ -1,5 +1,7 @@
 """Fine-tuning runner for LoRA and QLoRA jobs."""
 
+import importlib
+import importlib.util
 from pathlib import Path
 from typing import Any
 
@@ -13,6 +15,21 @@ from app.training.merge import merge_adapter
 from app.utils.files import ensure_directory, write_json
 
 LOGGER = get_logger(__name__)
+REQUIRED_TRAINING_DEPENDENCIES = ("torch", "datasets", "transformers", "peft")
+
+
+def get_missing_training_dependencies() -> list[str]:
+    """Return the top-level training packages that are not importable."""
+    return [name for name in REQUIRED_TRAINING_DEPENDENCIES if importlib.util.find_spec(name) is None]
+
+
+def build_missing_training_dependencies_message(missing: list[str]) -> str:
+    """Create an actionable error message for missing training dependencies."""
+    packages = ", ".join(missing)
+    return (
+        f"Training dependencies are missing: {packages}. "
+        "Install them with `python -m pip install -e .` and rebuild `llmstudio.exe` if you are using the packaged app."
+    )
 
 
 class FineTuneRunner:
@@ -25,21 +42,21 @@ class FineTuneRunner:
 
     def run_job(self, config: TrainingJobConfig) -> dict[str, Any]:
         """Execute a fine-tuning job using the configured strategy."""
-        try:
-            import torch
-            from datasets import Dataset
-            from peft import get_peft_model, prepare_model_for_kbit_training
-            from transformers import (
-                AutoModelForCausalLM,
-                AutoTokenizer,
-                DataCollatorForLanguageModeling,
-                Trainer,
-                TrainingArguments,
-            )
-        except ImportError as exc:
-            raise DependencyUnavailableError(
-                "Training requires torch, datasets, transformers and peft to be installed."
-            ) from exc
+        missing_dependencies = get_missing_training_dependencies()
+        if missing_dependencies:
+            raise DependencyUnavailableError(build_missing_training_dependencies_message(missing_dependencies))
+
+        torch = importlib.import_module("torch")
+        Dataset = importlib.import_module("datasets").Dataset
+        peft_module = importlib.import_module("peft")
+        transformers_module = importlib.import_module("transformers")
+        get_peft_model = peft_module.get_peft_model
+        prepare_model_for_kbit_training = peft_module.prepare_model_for_kbit_training
+        AutoModelForCausalLM = transformers_module.AutoModelForCausalLM
+        AutoTokenizer = transformers_module.AutoTokenizer
+        DataCollatorForLanguageModeling = transformers_module.DataCollatorForLanguageModeling
+        Trainer = transformers_module.Trainer
+        TrainingArguments = transformers_module.TrainingArguments
 
         adapter_output_dir = ensure_directory(config.output_dir / config.job_name)
         logs_dir = ensure_directory(config.logs_dir / config.job_name)
@@ -149,11 +166,20 @@ class FineTuneRunner:
             "job_name": config.job_name,
             "strategy": config.strategy,
             "base_model": config.base_model,
+            "train_file": str(config.train_file),
+            "validation_file": str(config.validation_file),
             "adapter_output_dir": str(adapter_output_dir),
             "merged_output_dir": merged_path,
+            "max_seq_length": config.max_seq_length,
+            "num_train_epochs": config.num_train_epochs,
+            "per_device_train_batch_size": config.per_device_train_batch_size,
+            "gradient_accumulation_steps": config.gradient_accumulation_steps,
+            "learning_rate": config.learning_rate,
             "training_loss": train_result.training_loss,
             "train_samples": len(train_records),
             "validation_samples": len(validation_records),
         }
         write_json(Path(adapter_output_dir) / "training_summary.json", summary)
+        if merged_path:
+            write_json(Path(merged_path) / "training_summary.json", summary)
         return summary
