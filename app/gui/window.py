@@ -96,7 +96,7 @@ class LLMStudioWindow(tk.Tk):
     """Main desktop window that exposes the project in a GUI-first workflow."""
 
     def __init__(self) -> None:
-        # Configure file logging before the UI starts so startup issues are captured.
+        # Configurar logging en archivo antes de que arranque la UI para capturar errores de inicio.
         configure_logging(include_console=False)
         super().__init__()
 
@@ -107,6 +107,10 @@ class LLMStudioWindow(tk.Tk):
         self._geometry_save_job: str | None = None
         self._closing_after_task = False
         self._last_activity = time.monotonic()
+
+        # URL conocida del backend; se actualiza solo desde resultados de tareas
+        # en background para evitar llamadas HTTP bloqueantes en el hilo Tk.
+        self._known_api_url: str = ""
 
         self._build_state()
         self._configure_window()
@@ -120,12 +124,17 @@ class LLMStudioWindow(tk.Tk):
         self._sync_backend_badge()
         self._sync_publish_source_from_last_training()
 
-        # Poll background work and countdown from the Tk event loop.
+        # Sondear resultados background y actualizar countdown desde el event loop de Tk.
         self.after(200, self._poll_background_results)
         self.after(1000, self._tick_auto_close)
 
         if self.auto_start_var.get():
+            # Auto-arrancar la API al abrir; la tarea actualiza _known_api_url al terminar.
             self.after(300, self.start_api)
+        else:
+            # Si no hay auto-start, sondear silenciosamente en background por si ya
+            # existe una API externa corriendo (evita bloquear el hilo Tk en init).
+            self.after(500, self._probe_api_on_startup)
 
     def _build_state(self) -> None:
         """Create Tk variables so the GUI can auto-save state changes."""
@@ -196,21 +205,46 @@ class LLMStudioWindow(tk.Tk):
         style.map("TNotebook.Tab", background=[("selected", "#fffdf8")])
 
     def _build_menu(self) -> None:
-        """Create a Windows-friendly menu with accelerators and About dialog access."""
+        """Crear la barra de menú con aceleradores y acceso al diálogo About.
+
+        Este método se llama UNA SOLA VEZ en __init__. Para cambios de idioma
+        se usa _update_menu_labels() que reutiliza los objetos existentes para
+        evitar el leak de memoria que ocurría al recrear menús repetidamente.
+        """
         self.menu_bar = tk.Menu(self)
         self.file_menu = tk.Menu(self.menu_bar, tearoff=False)
         self.language_menu = tk.Menu(self.menu_bar, tearoff=False)
         self.help_menu = tk.Menu(self.menu_bar, tearoff=False)
 
+        # Poblar cada submenú con sus comandos y radio buttons.
         self.file_menu.add_command(label=self._t("menu_exit"), accelerator="Ctrl+Q", command=self.request_close)
         self.language_menu.add_radiobutton(label=self._t("language_es"), value="es", variable=self.language_var, command=self._on_language_changed)
         self.language_menu.add_radiobutton(label=self._t("language_en"), value="en", variable=self.language_var, command=self._on_language_changed)
         self.help_menu.add_command(label=self._t("menu_about"), command=self.open_about_dialog)
 
+        # Agregar los submenús a la barra principal y aplicarla a la ventana.
         self.menu_bar.add_cascade(label=self._t("menu_file"), menu=self.file_menu)
         self.menu_bar.add_cascade(label=self._t("menu_language"), menu=self.language_menu)
         self.menu_bar.add_cascade(label=self._t("menu_help"), menu=self.help_menu)
         self.config(menu=self.menu_bar)
+
+    def _update_menu_labels(self) -> None:
+        """Actualizar solo los textos del menú existente sin recrear los widgets.
+
+        Llamar a _build_menu() en cada cambio de idioma creaba 4 nuevos objetos
+        tk.Menu sin destruir los anteriores, causando un leak de memoria creciente.
+        Este método reutiliza los mismos objetos y solo modifica sus labels.
+        """
+        # Actualizar labels de los ítems dentro de cada submenú.
+        self.file_menu.entryconfigure(0, label=self._t("menu_exit"))
+        self.language_menu.entryconfigure(0, label=self._t("language_es"))
+        self.language_menu.entryconfigure(1, label=self._t("language_en"))
+        self.help_menu.entryconfigure(0, label=self._t("menu_about"))
+
+        # Actualizar los cascades visibles en la barra de menú principal.
+        self.menu_bar.entryconfigure(0, label=self._t("menu_file"))
+        self.menu_bar.entryconfigure(1, label=self._t("menu_language"))
+        self.menu_bar.entryconfigure(2, label=self._t("menu_help"))
 
     def _build_layout(self) -> None:
         """Build header, toolbar, notebook and status bar."""
@@ -679,11 +713,13 @@ class LLMStudioWindow(tk.Tk):
         self.bind_all("<Any-ButtonPress>", self._record_activity, add="+")
 
     def _apply_translations(self) -> None:
-        """Refresh all user-facing labels after a language change."""
+        """Refrescar todas las etiquetas visibles al usuario después de un cambio de idioma."""
         self.title(self._t("app_title"))
         self.header_title.configure(text=self._t("app_title"))
         self.header_subtitle.configure(text=self._t("subtitle"))
-        self._build_menu()
+        # Actualizar labels de los menús existentes en lugar de recrearlos para
+        # evitar el leak de memoria que causaba _build_menu() en cada cambio de idioma.
+        self._update_menu_labels()
 
         self.start_api_button.configure(text=self._t("toolbar_start_api"))
         self.stop_api_button.configure(text=self._t("toolbar_stop_api"))
@@ -945,12 +981,16 @@ class LLMStudioWindow(tk.Tk):
 
         if result.name == "start_api":
             url = result.payload["url"]
+            # Cachear la URL conocida para que _sync_backend_badge no necesite hacer HTTP.
+            self._known_api_url = url
             message_key = "status_api_external" if result.payload["status"] == "external" else "status_api_running"
             self._set_status(self._t(message_key, url=url))
             self._sync_backend_badge()
             return
 
         if result.name == "stop_api":
+            # Limpiar la URL cacheada cuando la API se detiene.
+            self._known_api_url = ""
             self._set_status(self._t("status_api_stopped"))
             self._sync_backend_badge()
             if self._closing_after_task:
@@ -959,8 +999,12 @@ class LLMStudioWindow(tk.Tk):
 
         if result.name == "check_api":
             if result.payload["reachable"]:
+                # Actualizar la URL cacheada con el resultado del health check.
+                self._known_api_url = result.payload["url"]
                 self._set_status(self._t("status_api_running", url=result.payload["url"]))
             else:
+                # Limpiar cache cuando la API no responde.
+                self._known_api_url = ""
                 self._set_status(self._t("status_api_unavailable"), level="warning")
             self._sync_backend_badge()
             return
@@ -1020,13 +1064,28 @@ class LLMStudioWindow(tk.Tk):
         else:
             LOGGER.info(message)
 
-    def _sync_backend_badge(self) -> None:
-        """Refresh the visible backend state in the dashboard."""
+    def _probe_api_on_startup(self) -> None:
+        """Detectar en background si ya existe una API externa corriendo al arrancar.
+
+        Se ejecuta solo cuando auto_start está desactivado. Usa un worker
+        de fondo para que la llamada HTTP no bloquee el hilo principal de Tk.
+        """
+        host = self.host_var.get().strip() or "127.0.0.1"
         port = parse_positive_int(self.port_var.get(), self.gui_config.port)
-        health = self.server_controller.health(self.host_var.get().strip() or "127.0.0.1", port)
-        if health["reachable"]:
-            self.backend_state_var.set(health["url"])
+        self.task_runner.submit("check_api", self.server_controller.health, host, port)
+
+    def _sync_backend_badge(self) -> None:
+        """Actualizar el indicador visual del backend usando solo estado local cacheado.
+
+        No realiza ninguna llamada HTTP. El estado se actualiza exclusivamente
+        desde los resultados de tareas background (start_api, stop_api, check_api)
+        para evitar congelar el event loop de Tk.
+        """
+        if self._known_api_url:
+            # Mostrar la URL cuando se sabe que la API está disponible.
+            self.backend_state_var.set(self._known_api_url)
         else:
+            # Mostrar "offline" mientras no se ha confirmado disponibilidad.
             self.backend_state_var.set(self._t("backend_offline"))
 
     def _update_countdown_label(self) -> None:
@@ -1045,9 +1104,16 @@ class LLMStudioWindow(tk.Tk):
             self.countdown_var.set(self._t("countdown_disabled"))
 
     def _refresh_log_view(self) -> None:
-        """Load the latest log tail into the log tab."""
+        """Cargar las últimas líneas del log y hacer scroll al final.
+
+        Lee hasta 400 líneas del archivo de log y las muestra en el visor.
+        Después de insertar el contenido hace scroll automático a la última
+        línea para que el usuario siempre vea las entradas más recientes
+        sin necesidad de desplazarse manualmente.
+        """
         log_file = get_log_file()
         if log_file.exists():
+            # Leer el archivo con reemplazo de caracteres inválidos para robustez.
             lines = log_file.read_text(encoding="utf-8", errors="replace").splitlines()[-400:]
             content = "\n".join(lines)
         else:
@@ -1055,6 +1121,8 @@ class LLMStudioWindow(tk.Tk):
         self.log_text.configure(state="normal")
         self.log_text.delete("1.0", "end")
         self.log_text.insert("1.0", content)
+        # Saltar automáticamente al final para mostrar las líneas más recientes.
+        self.log_text.see("end")
         self.log_text.configure(state="disabled")
 
     def _build_guided_training_config(self) -> TrainingJobConfig:
@@ -1366,7 +1434,13 @@ class LLMStudioWindow(tk.Tk):
         self._open_path(config_file)
 
     def open_about_dialog(self) -> None:
-        """Show a lightweight About dialog without using message boxes."""
+        """Mostrar un diálogo About centrado sobre la ventana principal.
+
+        Se evita tk.messagebox para mantener el estilo visual del proyecto.
+        El diálogo es transitorio (se cierra al destruir la ventana padre) y
+        se centra geométricamente sobre la ventana principal para que siempre
+        sea visible, incluso en configuraciones multi-monitor.
+        """
         dialog = tk.Toplevel(self)
         dialog.title(self._t("menu_about"))
         dialog.transient(self)
@@ -1386,6 +1460,13 @@ class LLMStudioWindow(tk.Tk):
             justify="left",
         ).pack(anchor="w", pady=(12, 0))
         ttk.Button(body, text=self._t("about_ok"), style="Accent.TButton", command=dialog.destroy).pack(anchor="e", pady=(18, 0))
+
+        # Centrar el diálogo sobre la ventana principal.
+        # update_idletasks() fuerza el cálculo de dimensiones antes de posicionarlo.
+        dialog.update_idletasks()
+        x = self.winfo_x() + (self.winfo_width() - dialog.winfo_width()) // 2
+        y = self.winfo_y() + (self.winfo_height() - dialog.winfo_height()) // 2
+        dialog.geometry(f"+{max(x, 0)}+{max(y, 0)}")
 
     def _open_path(self, path: Path) -> None:
         """Open a file using the local operating system integration."""
