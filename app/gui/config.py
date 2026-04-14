@@ -55,7 +55,7 @@ class GuiConfig(BaseModel):
 
     # ── Paso 2: Entrenamiento ──────────────────────────────────────────────
     training_config_path: str = "configs/training/lora.yaml"
-    training_job_name: str = "deepseek-coder-lora-v0-2-0"
+    training_job_name: str = "deepseek-coder-lora-v0-3-4"
     training_strategy: str = "lora"           # "lora" o "qlora"
     training_base_model: str = "deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct"
     training_train_file: str = "data/processed/train.jsonl"

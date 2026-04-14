@@ -2,7 +2,7 @@
 
 DeepSeek Coder Studio is a production-oriented starter platform for fine-tuning and serving a coding LLM based on `deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct`. It now includes a desktop GUI for Windows-friendly operation, plus dataset preparation, LoRA/QLoRA training, evaluation, local or remote inference, a FastAPI backend, and a VS Code extension that consumes the backend from inside the editor.
 
-Version: `V0.3.3`
+Version: `V0.3.4`
 
 License: Apache License 2.0
 
@@ -127,7 +127,7 @@ npm run compile
 - Silent desktop frontend without console windows in the packaged `.exe`
 - Start/stop/check the FastAPI backend from the GUI
 - Prepare datasets, launch training and run evaluation from tabs
-- Guided training form for base model, processed train/validation splits and core hyperparameters
+- Guided training form with a one-click prepare-and-train button that auto-generates missing train/validation splits and saves the YAML before launching
 - Pre-flight validation for dataset paths, dependencies and QLoRA constraints
 - Save the current GUI training form as YAML before launching the job
 - Publish either the adapter folder or the merged model directly to Hugging Face

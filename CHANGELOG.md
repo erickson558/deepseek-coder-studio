@@ -1,5 +1,10 @@
 # Changelog
 
+## V0.3.4
+
+- Added a one-click GUI training flow that auto-generates missing train/validation splits before launching fine-tuning.
+- Synchronized version metadata across the Python app, README, packaged extension and training defaults.
+
 ## V0.3.0
 
 - Added a guided training workflow in the desktop GUI with editable hyperparameters, setup validation and YAML generation.

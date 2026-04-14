@@ -1,5 +1,5 @@
 version: "0.1"
-job_name: "deepseek-coder-qlora-v0-3-0"
+job_name: "deepseek-coder-qlora-v0-3-4"
 strategy: "qlora"
 base_model: "deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct"
 train_file: "data/processed/train.jsonl"

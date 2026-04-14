@@ -7,6 +7,7 @@ param(
 $root = Split-Path -Parent $PSScriptRoot
 $entryScript = Join-Path $root "llmstudio.py"
 $iconFile = Get-ChildItem -Path $root -Filter *.ico | Select-Object -First 1
+$workpath = Join-Path $env:TEMP ("llmstudio-pyinstaller-" + [guid]::NewGuid().ToString("N"))
 
 if (-not (Test-Path -LiteralPath $entryScript)) {
     throw "Entry script not found: $entryScript"
@@ -37,7 +38,7 @@ $pyInstallerArgs = @(
     "--distpath",
     $root,
     "--workpath",
-    (Join-Path $root "build\\pyinstaller"),
+    $workpath,
     "--specpath",
     (Join-Path $root "build\\pyinstaller"),
     "--icon",

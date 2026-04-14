@@ -43,6 +43,7 @@ from app.models.api import ChatRequest, GenerateRequest, GenerationParameters, T
 from app.models.dataset import Message
 from app.models.task import TaskType
 from app.services.assistant import AssistantService
+from app.training.config import load_training_config, save_training_config
 from app.training.hub import publish_training_artifacts
 from app.training.trainer import FineTuneRunner
 
@@ -279,6 +280,51 @@ def run_training(config_path: str) -> dict[str, Any]:
     Lee la config YAML en config_path y ejecuta FineTuneRunner.run().
     """
     return FineTuneRunner().run(config_path)
+
+
+def _resolve_dataset_input_path(dataset_input_path: str | Path) -> Path:
+    """Resolve the dataset input path and fall back to the bundled sample when needed."""
+    candidate = Path(dataset_input_path)
+    if candidate.exists():
+        return candidate
+
+    fallback = Path("data/samples/sample_dataset.jsonl")
+    if fallback.exists():
+        LOGGER.warning("Dataset input %s was not found; falling back to %s", candidate, fallback)
+        return fallback
+
+    raise FileNotFoundError(f"Dataset input not found: {candidate}")
+
+
+def run_auto_training(dataset_input_path: str, dataset_output_dir: str, config_path: str) -> dict[str, Any]:
+    """Prepare missing dataset splits and then run training in one background task.
+
+    The training config remains the source of truth for the train/validation file
+    locations, so the auto-flow can fill in missing files without changing the
+    existing manual training workflow.
+    """
+    config = load_training_config(config_path)
+    dataset_input = _resolve_dataset_input_path(dataset_input_path)
+    target_train_file = Path(config.train_file)
+    target_validation_file = Path(config.validation_file)
+
+    dataset_summary: dict[str, Any] | None = None
+    if not target_train_file.exists() or not target_validation_file.exists():
+        # Bootstrap the dataset only when the configured train/validation files are missing.
+        dataset_output = Path(dataset_output_dir) if dataset_output_dir.strip() else target_train_file.parent
+        dataset_summary = prepare_dataset(input_path=dataset_input, output_dir=dataset_output)
+        target_train_file = dataset_output / "train.jsonl"
+        target_validation_file = dataset_output / "validation.jsonl"
+        config = config.model_copy(update={"train_file": target_train_file, "validation_file": target_validation_file})
+        save_training_config(config_path, config)
+
+    training_summary = FineTuneRunner().run_job(config)
+    return {
+        "dataset_summary": dataset_summary,
+        "training_summary": training_summary,
+        "train_file": str(target_train_file),
+        "validation_file": str(target_validation_file),
+    }
 
 
 def run_evaluation(config_path: str) -> dict[str, Any]:

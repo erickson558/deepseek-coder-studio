@@ -42,11 +42,11 @@ from app.gui.tasks import (
     ApiServerController,
     BackgroundTaskRunner,
     TaskResult,
+    run_auto_training,
     run_publish_model,
     run_evaluation,
     run_inference,
     run_prepare_dataset,
-    run_training,
 )
 from app.models.task import TaskType
 from app.models.training import TrainingJobConfig
@@ -1206,10 +1206,30 @@ class LLMStudioWindow(tk.Tk):
             return
 
         if result.name == "train_model":
-            self.last_adapter_output_dir_var.set(result.payload["adapter_output_dir"] or "")
-            self.last_merged_output_dir_var.set(result.payload["merged_output_dir"] or "")
+            payload = result.payload or {}
+            training_summary = payload.get("training_summary", payload)
+            dataset_summary = payload.get("dataset_summary")
+            train_file = payload.get("train_file") or training_summary.get("train_file")
+            validation_file = payload.get("validation_file") or training_summary.get("validation_file")
+            if train_file:
+                self.training_train_file_var.set(str(train_file))
+            if validation_file:
+                self.training_validation_file_var.set(str(validation_file))
+            self.last_adapter_output_dir_var.set(training_summary.get("adapter_output_dir", "") or "")
+            self.last_merged_output_dir_var.set(training_summary.get("merged_output_dir", "") or "")
             self._sync_publish_source_from_last_training(force=True)
-            self._set_status(self._t("status_training_success", path=result.payload["adapter_output_dir"]))
+            if dataset_summary:
+                splits = dataset_summary.get("splits", {})
+                self._set_status(
+                    self._t(
+                        "status_auto_training_success",
+                        train=splits.get("train", training_summary.get("train_samples", "N/A")),
+                        validation=splits.get("validation", training_summary.get("validation_samples", "N/A")),
+                        path=training_summary.get("adapter_output_dir", ""),
+                    )
+                )
+            else:
+                self._set_status(self._t("status_training_success", path=training_summary.get("adapter_output_dir", "")))
             return
 
         if result.name == "evaluate_model":
@@ -1323,6 +1343,10 @@ class LLMStudioWindow(tk.Tk):
         if strategy not in TRAINING_STRATEGIES:
             strategy = "lora"
 
+        dataset_output_dir = self.dataset_output_var.get().strip() or "data/processed"
+        default_train_file = str(Path(dataset_output_dir) / "train.jsonl")
+        default_validation_file = str(Path(dataset_output_dir) / "validation.jsonl")
+
         train_batch_size = parse_positive_int(
             self.training_per_device_train_batch_size_var.get(),
             self.gui_config.training_per_device_train_batch_size,
@@ -1332,8 +1356,8 @@ class LLMStudioWindow(tk.Tk):
                 "job_name": self.training_job_name_var.get().strip() or f"llmstudio-{strategy}-job",
                 "strategy": strategy,
                 "base_model": self.training_base_model_var.get().strip(),
-                "train_file": self.training_train_file_var.get().strip(),
-                "validation_file": self.training_validation_file_var.get().strip(),
+                "train_file": self.training_train_file_var.get().strip() or default_train_file,
+                "validation_file": self.training_validation_file_var.get().strip() or default_validation_file,
                 "max_seq_length": parse_positive_int(
                     self.training_max_seq_length_var.get(),
                     self.gui_config.training_max_seq_length,
@@ -1520,23 +1544,36 @@ class LLMStudioWindow(tk.Tk):
         )
 
     def train_model_job(self) -> None:
-        """Validar el setup y lanzar el entrenamiento en un hilo background.
+        """Validar lo esencial y lanzar preparación + entrenamiento en un hilo background.
 
-        Flujo:
-          1. Llamar a validate_training_setup_action() para verificar archivos y
-             dependencias antes de intentar entrenar.
-          2. Si la validación falla, abortar y mostrar el error en la barra de estado.
-          3. Guardar el YAML de configuración generado desde el formulario.
-          4. Lanzar el FineTuneRunner en background.
+        El botón principal ahora cubre el flujo completo: si faltan train/validation
+        splits, el worker los genera automáticamente antes de llamar al trainer.
         """
-        report = self.validate_training_setup_action()
-        # BUG FIX: usar .get() para no lanzar KeyError si la estructura del
-        # reporte cambia. False como default bloquea el entrenamiento de forma segura.
-        if report is None or not report.get("valid", False):
+        try:
+            config = self._build_guided_training_config()
+        except Exception as exc:  # noqa: BLE001
+            self._set_status(self._t("status_validation_error", message=str(exc)), level="error")
             return
+
+        report = validate_training_job_config(config)
+        blocking_errors = [
+            check["message"]
+            for check in report["checks"]
+            if check["status"] == "error" and check["name"] not in {"train_file", "validation_file"}
+        ]
+        if blocking_errors:
+            self._set_status(self._t("status_validation_error", message="; ".join(blocking_errors[:2])), level="error")
+            return
+
         config_path = self._save_guided_training_config(show_status=False)
         self._set_status(self._t("status_busy"))
-        self.task_runner.submit("train_model", run_training, str(config_path))
+        self.task_runner.submit(
+            "train_model",
+            run_auto_training,
+            self.dataset_input_var.get(),
+            self.dataset_output_var.get(),
+            str(config_path),
+        )
 
     def evaluate_model_job(self) -> None:
         """Lanzar el benchmark de evaluación (Paso 3) en un hilo background.
