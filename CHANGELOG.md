@@ -31,3 +31,7 @@
 
 - Describe the release changes here.
 
+## V0.3.6
+
+- Describe the release changes here.
+
