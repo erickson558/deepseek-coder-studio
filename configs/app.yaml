@@ -1,6 +1,6 @@
 app:
   name: DeepSeek Coder Studio
-  version: 0.3.1
+  version: 0.3.3
   base_model: deepseek-ai/DeepSeek-Coder-V2-Lite-Instruct
   default_model_id: deepseek-coder-v2-lite-instruct
   model_source: adapter

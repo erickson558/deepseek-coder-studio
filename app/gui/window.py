@@ -1,4 +1,26 @@
-"""Tk-based desktop window for controlling the project without a console."""
+"""Ventana principal de escritorio Tk para controlar el proyecto sin consola.
+
+Arquitectura general
+────────────────────
+LLMStudioWindow (tk.Tk)
+    ├── Header  — título, subtítulo
+    ├── Toolbar — botones API, log, config, salir
+    ├── PreferenceCard — checkboxes de auto-start/cierre, host:puerto
+    ├── Notebook (4 pestañas)
+    │   ├── Dashboard   — estado de runtime y backend + guía de flujo
+    │   ├── Operations  — Paso 1..4: Dataset → Training → Evaluation → Publish
+    │   ├── Assistant   — inferencia local con el modelo entrenado
+    │   └── Logs        — visor de las últimas líneas de log.txt
+    └── StatusBar — mensaje de estado, barra de progreso, countdown
+
+Concurrencia
+────────────
+Toda operación larga (entrenar, evaluar, API, inferencia) se ejecuta en un
+hilo daemon a través de BackgroundTaskRunner.  El event loop de Tk es
+single-threaded: NUNCA se hace HTTP ni I/O blocking en el hilo principal.
+Los resultados llegan al hilo Tk por medio de una Queue que _poll_background_results()
+consume cada 200 ms.
+"""
 
 from __future__ import annotations
 
@@ -137,15 +159,27 @@ class LLMStudioWindow(tk.Tk):
             self.after(500, self._probe_api_on_startup)
 
     def _build_state(self) -> None:
-        """Create Tk variables so the GUI can auto-save state changes."""
+        """Crear las variables Tk que sincronizan la GUI con GuiConfig en disco.
+
+        Cada tk.StringVar / tk.BooleanVar está vinculada a un campo de GuiConfig.
+        Al cambiar cualquier variable, _on_variable_changed() persiste el estado
+        completo en config.json para sobrevivir reinicios de la aplicación.
+        """
+        # ── Preferencias de idioma y comportamiento de la ventana ────────────
         self.language_var = tk.StringVar(value=self.gui_config.language)
         self.auto_start_var = tk.BooleanVar(value=self.gui_config.auto_start_backend)
         self.auto_close_var = tk.BooleanVar(value=self.gui_config.auto_close_enabled)
         self.auto_close_seconds_var = tk.StringVar(value=str(self.gui_config.auto_close_seconds))
+
+        # ── Conexión al backend FastAPI ──────────────────────────────────────
         self.host_var = tk.StringVar(value=self.gui_config.host)
         self.port_var = tk.StringVar(value=str(self.gui_config.port))
+
+        # ── Paso 1: Preparar Dataset ─────────────────────────────────────────
         self.dataset_input_var = tk.StringVar(value=self.gui_config.dataset_input_path)
         self.dataset_output_var = tk.StringVar(value=self.gui_config.dataset_output_path)
+
+        # ── Paso 2: Entrenamiento ────────────────────────────────────────────
         self.training_config_var = tk.StringVar(value=self.gui_config.training_config_path)
         self.training_job_name_var = tk.StringVar(value=self.gui_config.training_job_name)
         self.training_strategy_var = tk.StringVar(value=self.gui_config.training_strategy)
@@ -158,20 +192,29 @@ class LLMStudioWindow(tk.Tk):
         self.training_learning_rate_var = tk.StringVar(value=str(self.gui_config.training_learning_rate))
         self.training_max_seq_length_var = tk.StringVar(value=str(self.gui_config.training_max_seq_length))
         self.training_merge_adapter_var = tk.BooleanVar(value=self.gui_config.training_merge_adapter)
+
+        # ── Paso 3: Evaluación ───────────────────────────────────────────────
         self.evaluation_config_var = tk.StringVar(value=self.gui_config.evaluation_config_path)
+
+        # ── Paso 4: Publicar en Hugging Face ─────────────────────────────────
         self.publish_repo_id_var = tk.StringVar(value=self.gui_config.publish_repo_id)
         self.publish_token_env_var = tk.StringVar(value=self.gui_config.publish_token_env_var)
         self.publish_private_repo_var = tk.BooleanVar(value=self.gui_config.publish_private_repo)
         self.publish_artifact_type_var = tk.StringVar(value=self.gui_config.publish_artifact_type)
         self.publish_source_dir_var = tk.StringVar(value=self.gui_config.publish_source_dir)
+        # Rutas del último entrenamiento: se usan para auto-rellenar publish_source_dir.
         self.last_adapter_output_dir_var = tk.StringVar(value=self.gui_config.last_adapter_output_dir)
         self.last_merged_output_dir_var = tk.StringVar(value=self.gui_config.last_merged_output_dir)
+
+        # ── Pestaña Asistente (inferencia local) ─────────────────────────────
         self.inference_task_var = tk.StringVar(value=self.gui_config.inference_task)
         self.inference_language_var = tk.StringVar(value=self.gui_config.inference_language)
         self.inference_context_file_var = tk.StringVar(value=self.gui_config.inference_context_file)
-        self.status_var = tk.StringVar(value="")
-        self.countdown_var = tk.StringVar(value="")
-        self.backend_state_var = tk.StringVar(value="")
+
+        # ── Variables de estado de la UI (no persistidas directamente) ───────
+        self.status_var = tk.StringVar(value="")          # barra de estado inferior
+        self.countdown_var = tk.StringVar(value="")       # countdown de auto-cierre
+        self.backend_state_var = tk.StringVar(value="")   # badge de estado del backend
         self.runtime_dir_var = tk.StringVar(value=str(get_runtime_dir()))
         self.config_path_var = tk.StringVar(value=str(get_config_file()))
         self.log_path_var = tk.StringVar(value=str(get_log_file()))
@@ -184,25 +227,51 @@ class LLMStudioWindow(tk.Tk):
         self.protocol("WM_DELETE_WINDOW", self.request_close)
 
     def _configure_style(self) -> None:
-        """Create a custom ttk look that feels like a real desktop control center."""
+        """Aplicar el tema visual personalizado a todos los widgets ttk.
+
+        Paleta de colores:
+          #f4efe6  — fondo principal (arena clara, ventana y pestañas)
+          #fffdf8  — fondo de tarjetas/LabelFrames (blanco marfil)
+          #1f6f8b  — acento principal (botones primarios, badges activos)
+          #0f3557  — título (azul oscuro)
+          #5b6470  — texto secundario (hints, subtítulos)
+          #1f2937  — texto normal
+          #d9cdb8  — bordes de sección
+        """
         style = ttk.Style(self)
+        # Clam es el tema más personalizable que incluye Tk por defecto en Windows.
         style.theme_use("clam")
 
+        # Fondo de la ventana raíz.
         self.configure(background="#f4efe6")
+        # Fuente y colores base heredados por todos los widgets.
         style.configure(".", font=("Segoe UI", 10), background="#f4efe6", foreground="#1f2937")
+
+        # ── Contenedores ──────────────────────────────────────────────────────
         style.configure("Card.TFrame", background="#fffdf8", relief="flat")
         style.configure("Section.TLabelframe", background="#fffdf8", bordercolor="#d9cdb8")
         style.configure("Section.TLabelframe.Label", background="#fffdf8", foreground="#345c72", font=("Segoe UI Semibold", 10))
+
+        # ── Etiquetas ─────────────────────────────────────────────────────────
         style.configure("Title.TLabel", background="#f4efe6", foreground="#0f3557", font=("Segoe UI Semibold", 24))
         style.configure("Subtitle.TLabel", background="#f4efe6", foreground="#5b6470", font=("Segoe UI", 10))
+
+        # ── Botones ───────────────────────────────────────────────────────────
+        # Accent = acción principal (Iniciar API, Preparar, Entrenar, etc.)
         style.configure("Accent.TButton", background="#1f6f8b", foreground="#ffffff", padding=(14, 10), borderwidth=0)
         style.map("Accent.TButton", background=[("active", "#16596f")])
+        # Secondary = acción secundaria (Buscar archivo, Detener, etc.)
         style.configure("Secondary.TButton", background="#dfe7ec", foreground="#153243", padding=(12, 10), borderwidth=0)
         style.map("Secondary.TButton", background=[("active", "#ced8df")])
+
+        # ── Barra de progreso (spinner de tareas en background) ───────────────
         style.configure("Status.Horizontal.TProgressbar", troughcolor="#e7e1d6", background="#1f6f8b")
         style.configure("TNotebook", background="#f4efe6", borderwidth=0)
         style.configure("TNotebook.Tab", padding=(18, 10), background="#dfd5c4", foreground="#334155")
         style.map("TNotebook.Tab", background=[("selected", "#fffdf8")])
+        # Estilo para las líneas de hint/descripción de cada paso en la pestaña Operaciones.
+        # Se usa background "#f4efe6" porque estas etiquetas están FUERA del LabelFrame (fondo arena).
+        style.configure("Step.Hint.TLabel", background="#f4efe6", foreground="#5b6470", font=("Segoe UI", 9))
 
     def _build_menu(self) -> None:
         """Crear la barra de menú con aceleradores y acceso al diálogo About.
@@ -211,7 +280,10 @@ class LLMStudioWindow(tk.Tk):
         se usa _update_menu_labels() que reutiliza los objetos existentes para
         evitar el leak de memoria que ocurría al recrear menús repetidamente.
         """
-        self.menu_bar = tk.Menu(self)
+        # tearoff=False es OBLIGATORIO en la barra principal: sin él tkinter
+        # inserta una entrada especial de "desgarre" en el índice 0, que no
+        # soporta la opción -label y provoca TclError al llamar entryconfigure.
+        self.menu_bar = tk.Menu(self, tearoff=False)
         self.file_menu = tk.Menu(self.menu_bar, tearoff=False)
         self.language_menu = tk.Menu(self.menu_bar, tearoff=False)
         self.help_menu = tk.Menu(self.menu_bar, tearoff=False)
@@ -352,10 +424,44 @@ class LLMStudioWindow(tk.Tk):
         self.backend_state_label.grid(row=0, column=0, sticky="w")
         ttk.Label(backend_card, textvariable=self.backend_state_var).grid(row=0, column=1, sticky="w", padx=(16, 0))
 
+        # ── Panel de flujo de trabajo recomendado ────────────────────────────
+        # Muestra al usuario en qué orden ejecutar las operaciones.
+        # Este panel es puramente informativo; no tiene controles interactivos.
+        workflow_card = ttk.LabelFrame(self.dashboard_tab, style="Section.TLabelframe", padding=16)
+        workflow_card.pack(fill="x", pady=(12, 0))
+        self.workflow_card = workflow_card
+        # Etiqueta con el resumen visual del flujo completo de 4 pasos.
+        self.workflow_overview_label = ttk.Label(
+            workflow_card,
+            justify="left",
+            foreground="#1f6f8b",
+            font=("Segoe UI Semibold", 10),
+        )
+        self.workflow_overview_label.grid(row=0, column=0, sticky="w")
+
     def _build_operations_tab(self) -> None:
-        """Create controls for dataset, training and evaluation workflows."""
-        dataset_card = ttk.LabelFrame(self.operations_tab, style="Section.TLabelframe", padding=16)
-        dataset_card.pack(fill="x", pady=(0, 12))
+        """Construir los controles de Operaciones con pasos numerados visibles.
+
+        Cada sección tiene:
+          - Un hint (etiqueta gris informativa) que explica qué hace ese paso.
+          - El LabelFrame con los controles reales del paso.
+
+        Orden de pasos:
+          Paso 1 — Preparar Dataset
+          Paso 2 — Entrenamiento
+          Paso 3 — Evaluación
+          Paso 4 — Publicar en Hugging Face
+        """
+        # ── PASO 1: PREPARAR DATASET ─────────────────────────────────────────
+        # Wrapper frame que agrupa el hint de paso y la tarjeta de controles.
+        # Usar un Frame intermedio evita tener que renumerar filas del grid interior.
+        step1_frame = ttk.Frame(self.operations_tab)
+        step1_frame.pack(fill="x", pady=(0, 4))
+        self.dataset_hint_label = ttk.Label(step1_frame, style="Step.Hint.TLabel", justify="left")
+        self.dataset_hint_label.pack(anchor="w")
+
+        dataset_card = ttk.LabelFrame(step1_frame, style="Section.TLabelframe", padding=16)
+        dataset_card.pack(fill="x", pady=(4, 12))
         self.dataset_card = dataset_card
         dataset_card.columnconfigure(1, weight=1)
 
@@ -374,8 +480,14 @@ class LLMStudioWindow(tk.Tk):
         self.prepare_dataset_button = ttk.Button(dataset_card, style="Accent.TButton", command=self.prepare_dataset_job)
         self.prepare_dataset_button.grid(row=2, column=1, pady=(12, 0), sticky="w")
 
-        training_card = ttk.LabelFrame(self.operations_tab, style="Section.TLabelframe", padding=16)
-        training_card.pack(fill="x", pady=(0, 12))
+        # ── PASO 2: ENTRENAMIENTO ────────────────────────────────────────────
+        step2_frame = ttk.Frame(self.operations_tab)
+        step2_frame.pack(fill="x", pady=(0, 4))
+        self.training_hint_label = ttk.Label(step2_frame, style="Step.Hint.TLabel", justify="left")
+        self.training_hint_label.pack(anchor="w")
+
+        training_card = ttk.LabelFrame(step2_frame, style="Section.TLabelframe", padding=16)
+        training_card.pack(fill="x", pady=(4, 12))
         self.training_card = training_card
         training_card.columnconfigure(0, weight=1)
 
@@ -501,8 +613,14 @@ class LLMStudioWindow(tk.Tk):
         self.training_button = ttk.Button(training_button_row, style="Accent.TButton", command=self.train_model_job)
         self.training_button.pack(side="left")
 
-        evaluation_card = ttk.LabelFrame(self.operations_tab, style="Section.TLabelframe", padding=16)
-        evaluation_card.pack(fill="x", pady=(0, 12))
+        # ── PASO 3: EVALUACIÓN ───────────────────────────────────────────────
+        step3_frame = ttk.Frame(self.operations_tab)
+        step3_frame.pack(fill="x", pady=(0, 4))
+        self.evaluation_hint_label = ttk.Label(step3_frame, style="Step.Hint.TLabel", justify="left")
+        self.evaluation_hint_label.pack(anchor="w")
+
+        evaluation_card = ttk.LabelFrame(step3_frame, style="Section.TLabelframe", padding=16)
+        evaluation_card.pack(fill="x", pady=(4, 12))
         self.evaluation_card = evaluation_card
         evaluation_card.columnconfigure(1, weight=1)
 
@@ -515,8 +633,14 @@ class LLMStudioWindow(tk.Tk):
         self.evaluation_button = ttk.Button(evaluation_card, style="Accent.TButton", command=self.evaluate_model_job)
         self.evaluation_button.grid(row=1, column=1, pady=(12, 0), sticky="w")
 
-        publish_card = ttk.LabelFrame(self.operations_tab, style="Section.TLabelframe", padding=16)
-        publish_card.pack(fill="x")
+        # ── PASO 4: PUBLICAR EN HUGGING FACE ────────────────────────────────
+        step4_frame = ttk.Frame(self.operations_tab)
+        step4_frame.pack(fill="x", pady=(0, 4))
+        self.publish_hint_label = ttk.Label(step4_frame, style="Step.Hint.TLabel", justify="left")
+        self.publish_hint_label.pack(anchor="w")
+
+        publish_card = ttk.LabelFrame(step4_frame, style="Section.TLabelframe", padding=16)
+        publish_card.pack(fill="x", pady=(4, 0))
         self.publish_card = publish_card
         publish_card.columnconfigure(1, weight=1)
 
@@ -749,6 +873,16 @@ class LLMStudioWindow(tk.Tk):
         self.backend_card.configure(text=self._t("card_backend"))
         self.backend_state_label.configure(text=self._t("backend_state"))
 
+        # Actualizar el panel de guía de flujo de trabajo en el Dashboard.
+        self.workflow_card.configure(text=self._t("workflow_intro"))
+        self.workflow_overview_label.configure(text=self._t("workflow_overview"))
+
+        # Actualizar los hints de pasos en la pestaña Operaciones.
+        self.dataset_hint_label.configure(text=self._t("step1_hint"))
+        self.training_hint_label.configure(text=self._t("step2_hint"))
+        self.evaluation_hint_label.configure(text=self._t("step3_hint"))
+        self.publish_hint_label.configure(text=self._t("step4_hint"))
+
         self.dataset_card.configure(text=self._t("dataset_group"))
         self.dataset_input_label.configure(text=self._t("input_path"))
         self.dataset_output_label.configure(text=self._t("output_path"))
@@ -940,41 +1074,84 @@ class LLMStudioWindow(tk.Tk):
         self._last_activity = time.monotonic()
 
     def _tick_auto_close(self) -> None:
-        """Update the visible countdown and close silently after inactivity."""
+        """Actualizar el countdown visible y cerrar la app silenciosamente por inactividad.
+
+        Se llama cada 1 segundo via self.after(). Lógica:
+          - Si auto-close está activado y el usuario lleva N segundos sin interactuar,
+            intenta cerrar la ventana.
+          - Si hay tareas activas (entrenamiento largo, evaluación), pospone el cierre
+            para no matar trabajos en vuelo.
+          - Si auto-close está desactivado, muestra el texto "Autocierre desactivado".
+        """
         if self.auto_close_var.get():
             timeout_seconds = parse_positive_int(
                 self.auto_close_seconds_var.get(),
                 self.gui_config.auto_close_seconds,
             )
+            # Calcular segundos restantes desde la última actividad del usuario.
             remaining = timeout_seconds - int(time.monotonic() - self._last_activity)
             if remaining <= 0:
                 if self.task_runner.has_active_tasks():
-                    # Avoid killing long-running training or evaluation jobs mid-flight.
+                    # No cerrar si hay trabajos en progreso: reset del timer.
                     self._record_activity()
                     self._set_status(self._t("status_busy"), level="warning")
                 else:
+                    # Sin tareas activas: solicitar cierre ordenado.
                     self._closing_after_task = True
                     self.request_close()
                     return
             self.countdown_var.set(self._t("countdown_active", seconds=max(remaining, 0)))
         else:
             self.countdown_var.set(self._t("countdown_disabled"))
+        # Reprogramar el siguiente tick en 1 segundo.
         self.after(1000, self._tick_auto_close)
 
     def _poll_background_results(self) -> None:
-        """Consume worker results and update the GUI safely from the main thread."""
+        """Consumir resultados del worker queue y actualizar la GUI desde el hilo Tk.
+
+        Se llama cada 200 ms via self.after(). Patrón productor-consumidor:
+          - Workers (hilos daemon) depositan TaskResult en task_runner.results (Queue).
+          - Este método (hilo Tk) los extrae y despacha a _handle_background_result().
+
+        La barra de progreso gira mientras haya tareas activas y se detiene
+        cuando la Queue está vacía y no hay workers corriendo.
+        """
+        # Vaciar toda la Queue de resultados disponibles en esta iteración.
         while not self.task_runner.results.empty():
             result = self.task_runner.results.get_nowait()
             self._handle_background_result(result)
 
+        # Animar la barra de progreso si aún hay tareas en vuelo.
         if self.task_runner.has_active_tasks():
-            self.progress.start(8)
+            self.progress.start(8)   # velocidad de animación en ms
         else:
             self.progress.stop()
+        # Reprogramar el siguiente poll en 200 ms.
         self.after(200, self._poll_background_results)
 
     def _handle_background_result(self, result: TaskResult) -> None:
-        """Render the result of a background action."""
+        """Despachar el resultado de una tarea background y actualizar la GUI.
+
+        Este método se llama SIEMPRE desde el hilo principal de Tk (via
+        _poll_background_results), por lo que es seguro actualizar widgets aquí.
+
+        BUG FIX: Todos los accesos a result.payload usan .get() con defaults
+        para evitar KeyError si el payload tiene estructura inesperada.
+        """
+        # ── Sondeo silencioso al arrancar ────────────────────────────────────
+        # probe_api_startup se lanza en background al abrir la app para detectar
+        # si ya hay una API externa corriendo. Si no hay API es el estado normal:
+        # no mostrar mensaje de error, solo actualizar el badge si hay algo activo.
+        if result.name == "probe_api_startup":
+            if result.success and result.payload.get("reachable"):
+                # API externa detectada: cachear URL y actualizar badge.
+                self._known_api_url = result.payload.get("url", "")
+                self._sync_backend_badge()
+            # Siempre silencioso: ni éxito ni fallo muestran mensaje de estado.
+            return
+
+        # ── Error genérico de tarea ──────────────────────────────────────────
+        # Cualquier excepción no capturada dentro del worker llega aquí.
         if not result.success:
             self._set_status(self._t("status_error", message=result.error_message or "Unknown error"), level="error")
             return
@@ -1010,16 +1187,20 @@ class LLMStudioWindow(tk.Tk):
             return
 
         if result.name == "prepare_dataset":
-            splits = result.payload["splits"]
+            # BUG FIX: usar .get() con dict vacío como fallback para evitar
+            # KeyError si el pipeline devuelve un payload con estructura diferente.
+            splits = result.payload.get("splits", {})
             output_dir = Path(self.dataset_output_var.get().strip() or "data/processed")
+            # Auto-rellenar los campos de archivos de entrenamiento con las rutas
+            # generadas por el pipeline para que el Paso 2 ya tenga los valores listos.
             self.training_train_file_var.set(str(output_dir / "train.jsonl"))
             self.training_validation_file_var.set(str(output_dir / "validation.jsonl"))
             self._set_status(
                 self._t(
                     "status_prepare_success",
-                    train=splits["train"],
-                    validation=splits["validation"],
-                    test=splits["test"],
+                    train=splits.get("train", 0),
+                    validation=splits.get("validation", 0),
+                    test=splits.get("test", 0),
                 )
             )
             return
@@ -1032,7 +1213,10 @@ class LLMStudioWindow(tk.Tk):
             return
 
         if result.name == "evaluate_model":
-            score = result.payload["summary"]["average_score"]
+            # BUG FIX: doble indexación protegida con .get() encadenado.
+            # Si "summary" o "average_score" no existen, muestra "N/A" en lugar
+            # de lanzar KeyError que bloquea el procesamiento de resultados.
+            score = result.payload.get("summary", {}).get("average_score", "N/A")
             self._set_status(self._t("status_evaluation_success", score=score))
             return
 
@@ -1065,14 +1249,22 @@ class LLMStudioWindow(tk.Tk):
             LOGGER.info(message)
 
     def _probe_api_on_startup(self) -> None:
-        """Detectar en background si ya existe una API externa corriendo al arrancar.
+        """Detectar silenciosamente si ya existe una API externa al arrancar.
 
-        Se ejecuta solo cuando auto_start está desactivado. Usa un worker
-        de fondo para que la llamada HTTP no bloquee el hilo principal de Tk.
+        Se ejecuta solo cuando auto_start está desactivado. Usa el nombre de
+        tarea "probe_api_startup" (distinto de "check_api") para que
+        _handle_background_result lo trate silenciosamente: si no hay API
+        corriendo es el estado normal de inicio, NO un error del usuario.
+
+        BUG FIX: El nombre anterior "check_api" hacía que un resultado negativo
+        al inicio mostrara "La API no está disponible" como si fuera un error,
+        confundiendo al usuario que recién abre la app.
         """
         host = self.host_var.get().strip() or "127.0.0.1"
         port = parse_positive_int(self.port_var.get(), self.gui_config.port)
-        self.task_runner.submit("check_api", self.server_controller.health, host, port)
+        # Usar nombre distinto de "check_api" para diferenciar sondeo de inicio
+        # del health check manual que sí debe mostrar resultado en la barra de estado.
+        self.task_runner.submit("probe_api_startup", self.server_controller.health, host, port)
 
     def _sync_backend_badge(self) -> None:
         """Actualizar el indicador visual del backend usando solo estado local cacheado.
@@ -1313,26 +1505,51 @@ class LLMStudioWindow(tk.Tk):
             self.inference_context_file_var.set(path)
 
     def prepare_dataset_job(self) -> None:
-        """Prepare the dataset in a background thread."""
+        """Lanzar la preparación de dataset (Paso 1) en un hilo background.
+
+        Convierte el archivo de entrada (JSONL/JSON/CSV) al formato instruct y
+        genera los splits train/validation/test en la carpeta de salida.
+        Al terminar, auto-rellena los campos de archivos de entrenamiento del Paso 2.
+        """
         self._set_status(self._t("status_busy"))
-        self.task_runner.submit("prepare_dataset", run_prepare_dataset, self.dataset_input_var.get(), self.dataset_output_var.get())
+        self.task_runner.submit(
+            "prepare_dataset",
+            run_prepare_dataset,
+            self.dataset_input_var.get(),
+            self.dataset_output_var.get(),
+        )
 
     def train_model_job(self) -> None:
-        """Launch model training in a background thread."""
+        """Validar el setup y lanzar el entrenamiento en un hilo background.
+
+        Flujo:
+          1. Llamar a validate_training_setup_action() para verificar archivos y
+             dependencias antes de intentar entrenar.
+          2. Si la validación falla, abortar y mostrar el error en la barra de estado.
+          3. Guardar el YAML de configuración generado desde el formulario.
+          4. Lanzar el FineTuneRunner en background.
+        """
         report = self.validate_training_setup_action()
-        if report is None or not report["valid"]:
+        # BUG FIX: usar .get() para no lanzar KeyError si la estructura del
+        # reporte cambia. False como default bloquea el entrenamiento de forma segura.
+        if report is None or not report.get("valid", False):
             return
         config_path = self._save_guided_training_config(show_status=False)
         self._set_status(self._t("status_busy"))
         self.task_runner.submit("train_model", run_training, str(config_path))
 
     def evaluate_model_job(self) -> None:
-        """Run benchmark evaluation in a background thread."""
+        """Lanzar el benchmark de evaluación (Paso 3) en un hilo background.
+
+        Ejecuta los casos de prueba definidos en el YAML de evaluación y calcula
+        métricas de calidad del modelo entrenado. El score promedio aparece en
+        la barra de estado al terminar.
+        """
         self._set_status(self._t("status_busy"))
         self.task_runner.submit("evaluate_model", run_evaluation, self.evaluation_config_var.get())
 
     def publish_model_job(self) -> None:
-        """Publish the selected training artifacts to the Hugging Face Hub."""
+        """Publicar artefactos de entrenamiento en Hugging Face Hub (Paso 4)."""
         repo_id = self.publish_repo_id_var.get().strip()
         if not repo_id:
             self._set_status(self._t("status_repo_required"), level="warning")
@@ -1355,9 +1572,15 @@ class LLMStudioWindow(tk.Tk):
         )
 
     def run_assistant_job(self) -> None:
-        """Run local inference from the assistant tab."""
+        """Lanzar inferencia local desde la pestaña Asistente.
+
+        El modelo se carga de forma lazy al primer uso (puede tardar varios segundos
+        la primera vez). Requiere que el modelo base esté configurado en settings.
+        Los parámetros de generación (temperatura, max tokens) vienen de AppSettings.
+        """
         prompt = self.prompt_text.get("1.0", "end").strip()
         if not prompt:
+            # Prevenir llamadas vacías: sin prompt no hay nada que inferir.
             self._set_status(self._t("status_prompt_required"), level="warning")
             return
         self._set_status(self._t("status_busy"))
@@ -1366,6 +1589,8 @@ class LLMStudioWindow(tk.Tk):
             run_inference,
             self.inference_task_var.get(),
             prompt,
+            # Normalizar a None si el campo está vacío para que run_inference
+            # sepa que no hay lenguaje o archivo de contexto especificados.
             self.inference_language_var.get().strip() or None,
             self.inference_context_file_var.get().strip() or None,
         )
@@ -1383,41 +1608,71 @@ class LLMStudioWindow(tk.Tk):
         self._set_status(self._t("status_copy_done"))
 
     def start_api(self) -> None:
-        """Start the backend API silently in a background worker."""
+        """Iniciar el backend FastAPI en un hilo daemon.
+
+        Si ya hay una API en el puerto configurado (externa o manejada),
+        ApiServerController.start() la reutiliza sin lanzar un proceso nuevo.
+        El resultado (URL disponible) llega vía _handle_background_result("start_api").
+        """
         host = self.host_var.get().strip() or "127.0.0.1"
         port = parse_positive_int(self.port_var.get(), -1)
         if port < 1:
+            # Puerto inválido: informar al usuario sin intentar arrancar.
             self._set_status(self._t("status_port_invalid"), level="warning")
             return
         self._set_status(self._t("status_busy"))
         self.task_runner.submit("start_api", self.server_controller.start, host, port)
 
     def stop_api(self) -> None:
-        """Stop the managed backend API silently."""
+        """Detener el servidor API manejado por esta instancia de la GUI.
+
+        Solo tiene efecto si la API fue iniciada por esta GUI (managed=True).
+        Si era una API externa, el resultado será "external" y no se detiene.
+        """
         self._set_status(self._t("status_busy"))
         self.task_runner.submit("stop_api", self.server_controller.stop)
 
     def check_api_health(self) -> None:
-        """Check whether the configured API endpoint is responding."""
+        """Verificar manualmente si el endpoint configurado responde a /health.
+
+        A diferencia de _probe_api_on_startup, ESTE check sí muestra resultado
+        en la barra de estado (disponible o no disponible).
+        """
         host = self.host_var.get().strip() or "127.0.0.1"
         port = parse_positive_int(self.port_var.get(), -1)
         if port < 1:
             self._set_status(self._t("status_port_invalid"), level="warning")
             return
         self._set_status(self._t("status_busy"))
+        # "check_api" (distinto de "probe_api_startup") siempre muestra resultado.
         self.task_runner.submit("check_api", self.server_controller.health, host, port)
 
     def request_close(self) -> None:
-        """Close the app without disrupting active work or leaving the API behind."""
+        """Cierre ordenado: persiste config, detiene la API y destruye la ventana.
+
+        Secuencia de cierre:
+          1. Si hay tareas activas (training, evaluation): bloquear y avisar al usuario.
+          2. Persistir config.json con el estado actual.
+          3. Si la GUI maneja el servidor API: lanzar stop_api() en background.
+             Al finalizar stop_api(), _handle_background_result lo detecta y llama destroy().
+          4. Si no hay servidor activo: destruir directamente.
+        """
+        # Bloquear cierre mientras hay trabajos en vuelo para no perder datos.
         if self.task_runner.has_active_tasks():
             self._set_status(self._t("status_close_blocked"), level="warning")
             return
 
+        # Guardar preferencias antes de salir.
         self._save_config()
+
         if self.server_controller.is_running():
+            # El servidor es manejado por esta GUI: detenerlo antes de destruir.
+            # _handle_background_result detecta el resultado "stop_api" y llama destroy().
             self._closing_after_task = True
             self.stop_api()
             return
+
+        # Sin servidor activo: destruir la ventana inmediatamente.
         self.destroy()
 
     def open_log_file(self) -> None:
@@ -1443,7 +1698,8 @@ class LLMStudioWindow(tk.Tk):
         """
         dialog = tk.Toplevel(self)
         dialog.title(self._t("menu_about"))
-        dialog.transient(self)
+        dialog.transient(self)   # se cierra con la ventana principal
+        dialog.grab_set()        # bloquea interacción con la ventana padre (modal)
         dialog.resizable(False, False)
         dialog.configure(background="#fffdf8")
         body = ttk.Frame(dialog, padding=18)

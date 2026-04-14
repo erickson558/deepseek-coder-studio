@@ -1,4 +1,14 @@
-"""Minimal translation catalog for the desktop GUI."""
+"""Catálogo de traducciones para la interfaz gráfica de escritorio.
+
+Contiene dos idiomas: español (es) e inglés (en).
+Cada clave mapea a una cadena de texto que puede incluir marcadores de
+formato {variable} para interpolación dinámica en tiempo de ejecución.
+
+Uso:
+    from app.gui.i18n import translate
+    texto = translate("es", "status_ready")
+    texto_con_datos = translate("en", "status_api_running", url="http://...")
+"""
 
 from __future__ import annotations
 
@@ -36,10 +46,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "version": "Versión",
         "backend_state": "Estado API",
         "backend_offline": "offline",
-        "dataset_group": "Preparación de dataset",
-        "training_group": "Entrenamiento",
-        "training_quick_group": "Entrenamiento guiado",
-        "evaluation_group": "Evaluación",
+        # ── Títulos de sección con número de paso para guiar al usuario ──────
+        "dataset_group": "Paso 1 — Preparar Dataset",
+        "training_group": "Paso 2 — Entrenamiento",
+        "training_quick_group": "Configuración guiada del entrenamiento",
+        "evaluation_group": "Paso 3 — Evaluación",
         "input_path": "Entrada",
         "output_path": "Salida",
         "training_config": "Archivo YAML",
@@ -63,7 +74,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "run_prepare_dataset": "Preparar dataset",
         "run_training": "Entrenar modelo",
         "run_evaluation": "Ejecutar evaluación",
-        "publish_group": "Publicar en Hugging Face",
+        "publish_group": "Paso 4 — Publicar en Hugging Face",
         "publish_repo_id": "Repo HF",
         "publish_token_env_var": "Variable token",
         "publish_private_repo": "Repositorio privado",
@@ -113,6 +124,14 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "language_en": "English",
         "open_file_title": "Seleccionar archivo",
         "open_dir_title": "Seleccionar carpeta",
+        # ── Guía de flujo de trabajo (panel de resumen en Dashboard) ──────────
+        "workflow_intro": "Flujo de trabajo recomendado",
+        "workflow_overview": "1. Preparar dataset  →  2. Entrenar modelo  →  3. Evaluar  →  4. Publicar en HF Hub",
+        # ── Hints de pasos (subtítulos informativos en pestaña Operaciones) ───
+        "step1_hint": "Convierte datos crudos (JSONL / JSON / CSV) al formato instruct requerido para entrenar.",
+        "step2_hint": "Configura LoRA o QLoRA y lanza el fine-tuning. Usa 'Validar setup' antes de entrenar.",
+        "step3_hint": "Ejecuta el benchmark para medir la calidad del modelo entrenado. Este paso es opcional.",
+        "step4_hint": "Sube el adapter o modelo fusionado a tu repositorio de Hugging Face Hub.",
     },
     "en": {
         "app_title": "DeepSeek Coder Studio",
@@ -146,10 +165,11 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "version": "Version",
         "backend_state": "API state",
         "backend_offline": "offline",
-        "dataset_group": "Dataset preparation",
-        "training_group": "Training",
-        "training_quick_group": "Guided training",
-        "evaluation_group": "Evaluation",
+        # ── Section titles with step numbers to guide the user ───────────────
+        "dataset_group": "Step 1 — Prepare Dataset",
+        "training_group": "Step 2 — Training",
+        "training_quick_group": "Guided training configuration",
+        "evaluation_group": "Step 3 — Evaluation",
         "input_path": "Input",
         "output_path": "Output",
         "training_config": "YAML file",
@@ -173,7 +193,7 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "run_prepare_dataset": "Prepare dataset",
         "run_training": "Train model",
         "run_evaluation": "Run evaluation",
-        "publish_group": "Publish to Hugging Face",
+        "publish_group": "Step 4 — Publish to Hugging Face",
         "publish_repo_id": "HF repo",
         "publish_token_env_var": "Token env var",
         "publish_private_repo": "Private repo",
@@ -223,12 +243,35 @@ TRANSLATIONS: dict[str, dict[str, str]] = {
         "language_en": "English",
         "open_file_title": "Select file",
         "open_dir_title": "Select folder",
+        # ── Workflow guide (summary panel in Dashboard) ───────────────────────
+        "workflow_intro": "Recommended workflow",
+        "workflow_overview": "1. Prepare dataset  →  2. Train model  →  3. Evaluate  →  4. Publish to HF Hub",
+        # ── Step hints (informational subtitles in Operations tab) ────────────
+        "step1_hint": "Convert raw files (JSONL / JSON / CSV) to the instruct format required for training.",
+        "step2_hint": "Configure LoRA or QLoRA and start fine-tuning. Use 'Validate setup' before training.",
+        "step3_hint": "Run the benchmark suite to measure the quality of the trained model. This step is optional.",
+        "step4_hint": "Upload the adapter or merged model to your Hugging Face Hub repository.",
     },
 }
 
 
 def translate(language: str, key: str, **kwargs: object) -> str:
-    """Translate a GUI string key and interpolate optional values."""
+    """Resuelve una clave de traducción e interpola variables dinámicas.
+
+    Si el idioma no está soportado cae automáticamente al inglés.
+    Si la clave no existe devuelve la clave misma como texto de emergencia
+    para que la GUI muestre algo visible en lugar de lanzar excepción.
+
+    Args:
+        language: Código de idioma ('es' o 'en').
+        key: Identificador de la cadena en el catálogo.
+        **kwargs: Variables a interpolar con str.format().
+
+    Returns:
+        Cadena traducida con variables sustituidas.
+    """
+    # Elegir el catálogo del idioma solicitado o inglés como fallback.
     catalog = TRANSLATIONS.get(language, TRANSLATIONS["en"])
+    # Devolver la clave como texto si no existe en el catálogo (fail-safe visible).
     template = catalog.get(key, key)
     return template.format(**kwargs)
